@@ -1,0 +1,35 @@
+# Build outputs and downloaded toolchains
+[Bb]in/
+[Oo]bj/
+artifacts/
+*.binlog
+*.dSYM/
+*.app/
+*.ipa
+*.xcarchive/
+
+# Local SDK, package, and IDE state
+.dotnet/
+.nuget/
+.idea/
+.vs/
+*.user
+*.suo
+
+# Credentials, provisioning, pairing, and local configuration
+.env
+.env.*
+!.env.example
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
+*.mobiledevicepairing
+*.pem
+*.key
+secrets/
+receipts/private/
+
+# OS files
+.DS_Store
+Thumbs.db

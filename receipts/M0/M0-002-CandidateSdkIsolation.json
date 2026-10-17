@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "M0-002-CandidateSdkIsolation",
+  "milestone": "M0",
+  "status": "passed",
+  "timestampUtc": "2026-10-17T11:21:32Z",
+  "repositoryRevision": null,
+  "toolchainLockSha256": "e647355a38ec868caca79f764ff38f13e944df53f47026689b4c0bec06c4ee4f",
+  "expectedBehavior": "Download the candidate Linux x64 SDK into a disposable home, verify the published SHA-512, and run it without consulting the system SDK.",
+  "observedBehavior": "The 10.0.302 archive SHA-512 matched official release metadata. The extracted SDK reported 10.0.302, SDK commit 35b593bebf, host runtime 10.0.10, and no installed workloads from the isolated root.",
+  "limitations": [
+    "This proves SDK archive integrity and isolated execution only.",
+    "No iOS workload was installed.",
+    "No canonical ~/.dotnet state was changed."
+  ],
+  "nextDecision": "Use this isolated SDK only for subsequent disposable workload-graph experiments after the manifest strategy is defined.",
+  "commands": [
+    {
+      "command": "curl --fail --location --retry 3 --proto '=https' --tlsv1.2 <official-dotnet-sdk-10.0.302-linux-x64-url>; sha512sum; tar -xzf; DOTNET_ROOT=<isolated-root> dotnet --info",
+      "exitCode": 0
+    }
+  ],
+  "artifacts": [
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/candidate-sdk/dotnet-sdk-10.0.302-linux-x64.tar.gz",
+      "sha256": "264a838d6f5d1a252489c7bb2e2946a579d6a881391d50ffd175a01e4d948c1c"
+    },
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/candidate-sdk/dotnet-info.txt",
+      "sha256": "1c2f443ecaeae6b6dd5b008fee20c35d73303845d06a55fe15bcd0b0799c0e1b"
+    }
+  ],
+  "redaction": {
+    "performed": true,
+    "excluded": [
+      "home-directory identity",
+      "credentials",
+      "package cache contents"
+    ]
+  }
+}

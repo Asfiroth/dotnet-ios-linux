@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "M0-003-WorkloadFreeLinuxEvaluation",
+  "milestone": "M0",
+  "status": "blocked",
+  "timestampUtc": "2026-10-17T11:21:32Z",
+  "repositoryRevision": null,
+  "toolchainLockSha256": "e647355a38ec868caca79f764ff38f13e944df53f47026689b4c0bec06c4ee4f",
+  "expectedBehavior": "Classify the first failure of the ordinary HelloIos project under the isolated candidate SDK before any workload installation.",
+  "observedBehavior": "dotnet workload --info succeeded and reported no installed workload sets. dotnet build --no-restore exited 1 at Microsoft.NET.Sdk.ImportWorkloads.targets with NETSDK1147, requesting wasm-tools rather than ios.",
+  "limitations": [
+    "No iOS manifest or packs are installed, so this is not an iOS-target evaluation.",
+    "The unexpected wasm-tools request requires comparison with a Mac reference build and an installed official manifest before diagnosis.",
+    "The binlog is local-only and has not been inspected with an iOS task graph."
+  ],
+  "nextDecision": "Do not work around the wasm-tools request. Capture the Mac reference trace, then test the official and proposed manifest graph in a disposable home during M1.",
+  "commands": [
+    {
+      "command": "DOTNET_ROOT=<isolated-root> dotnet workload --info",
+      "exitCode": 0
+    },
+    {
+      "command": "DOTNET_ROOT=<isolated-root> dotnet build tests/HelloIos/HelloIos.csproj -f net10.0-ios -r ios-arm64 -c Release --no-restore /bl:<local-binlog>",
+      "exitCode": 1
+    }
+  ],
+  "artifacts": [
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/candidate-sdk/linux-evaluation.txt",
+      "sha256": "b7b0ccae1b0bbf0fa95d52f00e6aeb70a477393ff8ce2218e1f0b5793c5d9722"
+    },
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/candidate-sdk/helloios-linux-evaluation.binlog",
+      "sha256": "4899ec66c1de29a8d887431329fd3cc455e8d8af7730172e8f5c9ab85d649c3b"
+    }
+  ],
+  "redaction": {
+    "performed": true,
+    "excluded": [
+      "credentials",
+      "device data",
+      "raw binlog from repository history"
+    ]
+  }
+}

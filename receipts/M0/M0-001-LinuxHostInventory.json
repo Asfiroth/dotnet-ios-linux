@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "M0-001-LinuxHostInventory",
+  "milestone": "M0",
+  "status": "passed",
+  "timestampUtc": "2026-10-17T11:21:32Z",
+  "repositoryRevision": null,
+  "toolchainLockSha256": "e647355a38ec868caca79f764ff38f13e944df53f47026689b4c0bec06c4ee4f",
+  "expectedBehavior": "Capture Linux and canonical-root facts without mutating any .NET installation.",
+  "observedBehavior": "The host resolved /usr/bin/dotnet to package-managed SDK 10.0.113. dotnet --info and workload commands exited 1 because workload-set version 10.0.401 has missing manifests. ~/.dotnet was inventoried without modification.",
+  "limitations": [
+    "The package-managed SDK is not the candidate baseline.",
+    "No repair was run because this shared installation is outside the experiment boundary.",
+    "The canonical root has not been activated or lifecycle-tested."
+  ],
+  "nextDecision": "Use the isolated 10.0.302 SDK for M0/M1 experiments and retain the package-managed installation as an unrelated host observation.",
+  "commands": [
+    {
+      "command": "scripts/capture-linux-inventory.sh --output /tmp/opencode/dotnet-ios-linux-m0/linux-host --dotnet-root $HOME/.dotnet",
+      "exitCode": 0
+    }
+  ],
+  "artifacts": [
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/linux-host/linux-host-inventory.txt",
+      "sha256": "ff93d9577f7750c53c74fe4f77baddd4bf59db137327edec1d35b3bca096772f"
+    },
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/linux-host/dotnet-root-files.txt",
+      "sha256": "5feb145621b3881f710f500e2f47ee6e0eea08339df7ede0e698db888bc70093"
+    }
+  ],
+  "redaction": {
+    "performed": true,
+    "excluded": [
+      "arbitrary environment variables",
+      "credentials",
+      "package caches",
+      "device records"
+    ]
+  }
+}
