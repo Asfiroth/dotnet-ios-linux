@@ -28,7 +28,7 @@ artifacts/
 *.pem
 *.key
 secrets/
-receipts/private/
+receipts/
 macios-references/
 
 # OS files

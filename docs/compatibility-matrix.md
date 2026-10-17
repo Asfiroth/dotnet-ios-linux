@@ -38,8 +38,11 @@ requested input exists; it does not mean it works on Linux.
 - The explicit-dotnet Mac captures verify the active SDK/workload/Xcode baseline
   and installed AOT/runtime pack directories. `HelloIos` stopped at
   provisioning-profile discovery before AOT, native linking, or bundle output.
-- `AotProbe` compiled as an iOS-targeted class library and produced only managed
-  `AotProbe.dll`; it is not an AOT, native-output, or device-execution result.
+- A standalone `AotProbe` build remains class-library compilation only. A later
+  clean HelloIos app build references the library and its verified private
+  binlog records `AotProbe.dll` trimming, Mono AOT compilation, generated AOT
+  artifacts, and inclusion in the native link. Device execution remains
+  unverified.
 - The received reports reference binlogs written below the project directories,
   not the supplied capture directories. The hardened capture script now uses an
   absolute private output path, requires the binlog, and returns build failure.
