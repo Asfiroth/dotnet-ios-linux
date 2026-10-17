@@ -1,5 +1,6 @@
 using Foundation;
 using UIKit;
+using AotProbe;
 
 namespace HelloIos;
 
@@ -18,16 +19,17 @@ public sealed class AppDelegate : UIApplicationDelegate
 
     public override bool FinishedLaunching(UIApplication application, NSDictionary? launchOptions)
     {
+        var probeResult = DeviceAotProbe.Execute();
         Window = new UIWindow(UIScreen.MainScreen.Bounds)
         {
-            RootViewController = new HelloViewController()
+            RootViewController = new HelloViewController(probeResult)
         };
         Window.MakeKeyAndVisible();
         return true;
     }
 }
 
-public sealed class HelloViewController : UIViewController
+public sealed class HelloViewController(AotProbeResult probeResult) : UIViewController
 {
     public override void ViewDidLoad()
     {
@@ -36,7 +38,9 @@ public sealed class HelloViewController : UIViewController
 
         var label = new UILabel(View.Bounds)
         {
-            Text = "Hello from Linux-hosted .NET iOS",
+            Text = $"Hello from Linux-hosted .NET iOS\n"
+                + $"AOT probe: {probeResult.GenericValue}; exception={probeResult.ExceptionCode}; "
+                + $"pid={probeResult.ProcessId}; checksum={probeResult.SortedChecksum}",
             TextAlignment = UITextAlignment.Center,
             Lines = 0,
             AutoresizingMask = UIViewAutoresizing.FlexibleWidth | UIViewAutoresizing.FlexibleHeight

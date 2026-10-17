@@ -7,13 +7,13 @@ requested input exists; it does not mean it works on Linux.
 | --- | --- | --- | --- |
 | Linux host | EndeavourOS/Arch x86_64, glibc | observed | Full M0 inventory and disposable SDK run |
 | .NET SDK | 10.0.402 / feature band 10.0.400 | source availability verified | Download hash verification and reference-Mac parity |
-| macios | 27.0.10722 / Xcode 27.0 | release/package commits and explicit Mac inventory verified; HelloIos blocked before AOT | Successful profile-selected Mac AOT invocation and package graph |
+| macios | 27.0.10722 / Xcode 27.0 | release/package commits, Mac inventory, AOT execution, and native link verified | Retained final-app inspection and clean-worktree reference capture |
 | Workload set | CLI 10.0.401.1 / package 10.401.1 | package inspected; declares `10.0.100` manifest suffix | Effective install mode and lifecycle experiments |
 | iOS workload | `ios` | official manifest inspected; Linux mapping absent | One effective Linux-compatible definition |
-| Mono device AOT | Linux x64 host to iOS arm64 | unverified | Runtime commit, compiler build, object inspection |
+| Mono device AOT | Linux x64 host to iOS arm64 | Mac reference AOT/native link verified; Linux host unverified | Linux compiler build, object inspection, and matching runtime provenance |
 | Apple SDK | Xcode 27.0 / iPhoneOS 27.0 family | user-supplied only | Legal review, source metadata, hashes |
 | Darwin backend | omarchy-apple-dev components | unverified | Pinned revision and command-contract evidence |
-| Signing and USB deployment | development identity and paired iPhone | profile-selection route verified; execution not started | Private successful signing, installation, and launch receipts |
+| Signing and USB deployment | development identity and paired iPhone | profile selection and successful Mac build observed; signature verification/USB deployment not started | Final-app signature inspection, installation, and launch receipts |
 | Uno and Rider | stock consumers | not started | Separate consumer-gate receipts |
 
 ## Claim Boundaries
@@ -43,3 +43,9 @@ requested input exists; it does not mean it works on Linux.
 - The received reports reference binlogs written below the project directories,
   not the supplied capture directories. The hardened capture script now uses an
   absolute private output path, requires the binlog, and returns build failure.
+- A later profile-selected HelloIos capture completed successfully after a
+  clean. Its verified private binlog records actual `mono-aot-cross` output for
+  `arm64-ios`, generated AOT artifacts, an executed `clang++` native-link
+  command, and linker output. This proves the Mac reference path only; it does
+  not establish Linux-hosted AOT, final-app architecture/signature inspection,
+  or device execution.
