@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "M0-006-RebaselinedLinuxEvaluation",
+  "milestone": "M0",
+  "status": "blocked",
+  "timestampUtc": "2026-10-17T14:13:48Z",
+  "repositoryRevision": null,
+  "toolchainLockSha256": "a7c14e9ddba4dd11bfd0e01feecfad129a789f16bd5b1acbdd6828f8bd16a6f5",
+  "expectedBehavior": "Verify the active Linux SDK archive in isolation and classify the first workload-free HelloIos build failure.",
+  "observedBehavior": "SDK 10.0.402 SHA-512 matched official metadata and ran from an isolated temporary root. With no workloads installed, the ordinary HelloIos build stopped at NETSDK1147, requesting wasm-tools rather than ios.",
+  "limitations": [
+    "No workload set, iOS manifest, or iOS pack was installed.",
+    "The observed wasm-tools request does not establish an iOS resolver strategy.",
+    "No canonical ~/.dotnet state was changed."
+  ],
+  "nextDecision": "Compare against a corrected Mac AOT-capable reference, then test the official and project-owned manifest graphs in a disposable home during M1.",
+  "commands": [
+    {
+      "command": "Download, SHA-512 verify, and extract dotnet-sdk-10.0.402-linux-x64.tar.gz into /tmp/opencode; run dotnet --info with isolated HOME, DOTNET_ROOT, and NUGET_PACKAGES.",
+      "exitCode": 0
+    },
+    {
+      "command": "DOTNET_ROOT=<isolated-root> dotnet build tests/HelloIos/HelloIos.csproj -f net10.0-ios -r ios-arm64 -c Release --no-restore /bl:<local-binlog>",
+      "exitCode": 1
+    }
+  ],
+  "artifacts": [
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/rebaseline-sdk/dotnet-sdk-10.0.402-linux-x64.tar.gz",
+      "sha256": "a131496fe7dac21dceea13354e50a3636126fac05d6e5ccf5fb250829c6e9b6a"
+    },
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/rebaseline-sdk/dotnet-info.txt",
+      "sha256": "a181a8552dce0ffad6ce6704bc43d7b822cf80d15e9d3b248d32f2322491d046"
+    },
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/rebaseline-sdk/linux-evaluation.txt",
+      "sha256": "375501431faf08a829a46c9cb1cb94eaa98d7b14d00bd3b4cc15c4ea3fa8e18c"
+    },
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/rebaseline-sdk/helloios-linux-evaluation.binlog",
+      "sha256": "491ba25aa61e36590b779c38bcb290ec03cd4bf71b0f76d0e5c93d243c802f7c"
+    }
+  ],
+  "redaction": {
+    "performed": true,
+    "excluded": [
+      "home-directory identity",
+      "credentials",
+      "device data",
+      "raw binlog content"
+    ]
+  }
+}

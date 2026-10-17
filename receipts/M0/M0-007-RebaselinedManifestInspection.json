@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "M0-007-RebaselinedManifestInspection",
+  "milestone": "M0",
+  "status": "passed",
+  "timestampUtc": "2026-10-17T14:13:47Z",
+  "repositoryRevision": null,
+  "toolchainLockSha256": "a7c14e9ddba4dd11bfd0e01feecfad129a789f16bd5b1acbdd6828f8bd16a6f5",
+  "expectedBehavior": "Inspect the active workload-set and iOS manifest packages without installing them into a .NET root.",
+  "observedBehavior": "Microsoft.NET.Workloads.10.0.400 10.401.1 maps Microsoft.NET.Sdk.iOS to 27.0.10722/10.0.100. Microsoft.NET.Sdk.iOS.Manifest-10.0.100 27.0.10722 exposes workload ID ios, iOS runtime packs, and Windows SDK aliases only.",
+  "limitations": [
+    "Package inspection does not prove manifest precedence, installation, repair, or uninstall behavior.",
+    "No Linux host mapping was observed in the official manifest.",
+    "Transitive Mono/toolchain packs remain to be inventoried."
+  ],
+  "nextDecision": "Use the inspected schema as input to a disposable M1 conflict and lifecycle experiment; do not generate a custom manifest before that experiment is designed.",
+  "commands": [
+    {
+      "command": "Download and inspect Microsoft.NET.Workloads.10.0.400 10.401.1 and Microsoft.NET.Sdk.iOS.Manifest-10.0.100 27.0.10722 with unzip.",
+      "exitCode": 0
+    }
+  ],
+  "artifacts": [
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/rebaseline-package-metadata/microsoft.net.workloads.10.0.400.10.401.1.nupkg",
+      "sha256": "8828d2f982dfab382393bdddba39c3649df13c7bf9fc5607675c582e46f62730"
+    },
+    {
+      "reference": "/tmp/opencode/dotnet-ios-linux-m0/rebaseline-package-metadata/microsoft.net.sdk.ios.manifest-10.0.100.27.0.10722.nupkg",
+      "sha256": "6c879bc82d08c3b149fd737ab4e75a61cefa72d116680286c2559756a5b8f65d"
+    }
+  ],
+  "redaction": {
+    "performed": true,
+    "excluded": [
+      "Apple SDK assets",
+      "credentials",
+      "device records"
+    ]
+  }
+}

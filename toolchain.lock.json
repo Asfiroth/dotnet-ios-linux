@@ -1,9 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "schemaVersion": 1,
-  "status": "candidate",
+  "status": "active-candidate",
   "generatedAtUtc": "2026-10-17T00:00:00Z",
-  "purpose": "M0 candidate baseline only; this is not an accepted compatibility lock.",
+  "purpose": "Rebaselined M0 candidate. Source integrity and Mac observation are recorded; Linux compatibility remains unverified.",
+  "supersedes": {
+    "lockSha256": "e647355a38ec868caca79f764ff38f13e944df53f47026689b4c0bec06c4ee4f",
+    "historicalLock": "receipts/locks/e647355a38ec868caca79f764ff38f13e944df53f47026689b4c0bec06c4ee4f.json",
+    "reason": "Operator-selected rebaseline to the supplied .NET 10.0.402 / macios 27.0.10722 / Xcode 27.0 reference stack."
+  },
   "baseline": {
     "host": "linux-x64-glibc",
     "framework": "net10.0-ios",
@@ -13,85 +18,98 @@
   "components": {
     "dotnetSdk": {
       "status": "download-hash-verified",
-      "version": "10.0.302",
-      "featureBand": "10.0.300",
-      "runtimeVersion": "10.0.10",
-      "sdkCommit": "35b593bebf",
+      "version": "10.0.402",
+      "featureBand": "10.0.400",
+      "sdkCommit": "a8dd0577c5",
+      "runtimeVersion": "10.0.13",
       "rid": "linux-x64",
-      "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.302/dotnet-sdk-10.0.302-linux-x64.tar.gz",
-      "sha512": "10069bec8783596484a610332f090d562802a41b9b40e3327a5a5688b572e10c296ae300f940d40461f23c157ed1b0843c2f8e6b3f20d8d8d9d83432d8143bac",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.402/dotnet-sdk-10.0.402-linux-x64.tar.gz",
+      "sha512": "1904a98dda2db34ba78ba3c4fb1b224455329af91c341d83547843c1839e112b04ae699ee92fa2449a8f62249196a938723078c0c60b9f65c88539d5687729c2",
       "source": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/10.0/releases.json"
     },
     "workloadSet": {
       "status": "package-hash-verified; effective-installation-behavior-pending",
-      "cliVersion": "10.0.302.0",
-      "packageId": "Microsoft.NET.Workloads.10.0.300",
-      "packageVersion": "10.302.0",
-      "sha512Base64": "jmZ10ELwWxxWdnrC0tKDPozloE80TZPrnEA0WUsvZJ6ttgRmVREMXevxF0HlqH6Kokbl73UNA3VbSwCcNLH4EQ==",
-      "sourceCommit": "ff54067027c8a72eed67896c46b2debc215a7db5",
-      "source": "https://www.nuget.org/packages/Microsoft.NET.Workloads.10.0.300/10.302.0",
+      "cliVersion": "10.0.401.1",
+      "packageId": "Microsoft.NET.Workloads.10.0.400",
+      "packageVersion": "10.401.1",
+      "sha512Base64": "rSxOQ3DTzIJQ+dLLwB1ASR5N2tspp5eBTcGTolm32SroJ8J7K76k8R7FyfSaGf7aeEYWI8S6rbld6H0oX2clDA==",
+      "sourceCommit": "a827f0e1063d9a33164ebaa738c161cc94c47532",
+      "source": "https://www.nuget.org/packages/Microsoft.NET.Workloads.10.0.400/10.401.1",
       "declaredManifestPackageSuffix": "10.0.100"
     },
     "macios": {
-      "status": "release-and-commit-verified; complete-package-inventory-pending",
-      "releaseTag": "dotnet-10.0.1xx-xcode26.6-10301",
-      "commit": "e6aeff4eaafa3918d4a27db2dcf5aba43cc3443c",
-      "packageVersion": "26.5.10301",
-      "source": "https://github.com/dotnet/macios/releases/tag/dotnet-10.0.1xx-xcode26.6-10301"
+      "status": "release-and-package-commit-verified; complete-package-inventory-pending",
+      "releaseTag": "dotnet-10.0.1xx-xcode27.0-10722",
+      "packageCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3",
+      "packageVersion": "27.0.10722",
+      "source": "https://github.com/dotnet/macios/releases/tag/dotnet-10.0.1xx-xcode27.0-10722"
     },
-    "iosPackages": [
-      {
-        "id": "Microsoft.iOS.Sdk.net10.0_26.5",
-        "version": "26.5.10301",
-        "status": "catalog-hash-verified; package-content-inventory-pending",
-        "sha512Base64": "l2cufscvUOUjaOXyT6qQUf7fxHWqO73F7Mb4Qx6hA4ILl8sCSuqYFjeht3hBCk08y1eb3/OU0WiPeAkK9Vcp9g==",
-        "sourceCommit": "e6aeff4eaafa3918d4a27db2dcf5aba43cc3443c",
-        "source": "https://api.nuget.org/v3/catalog0/data/2026.07.14.17.15.38/microsoft.ios.sdk.net10.0_26.5.26.5.10301.json"
-      },
-      {
-        "id": "Microsoft.iOS.Ref.net10.0_26.5",
-        "version": "26.5.10301",
-        "status": "catalog-hash-verified; package-content-inventory-pending",
-        "sha512Base64": "AKtH4AnhH2RvX1pAT3YOsZAmNbYYdDEOaXgmcJJmoW6rvjCpUMVZx+fAyU8RTBbVa/zJ4kBDQFoMrf6KXr6AjQ==",
-        "sourceCommit": "e6aeff4eaafa3918d4a27db2dcf5aba43cc3443c"
-      },
-      {
-        "id": "Microsoft.iOS.Runtime.ios.net10.0_26.5",
-        "version": "26.5.10301",
-        "status": "catalog-hash-verified; package-content-inventory-pending",
-        "sha512Base64": "C3qnASGo1nLBavI3rBc87E5pKNWCul6MmCdC9dQfw3chYbpsFsJyaVRqJoYoTtgyAZJhzQms9N/nMOMro1/bvQ==",
-        "sourceCommit": "e6aeff4eaafa3918d4a27db2dcf5aba43cc3443c"
-      },
-      {
-        "id": "Microsoft.iOS.Runtime.ios-arm64.net10.0_26.5",
-        "version": "26.5.10301",
-        "status": "catalog-hash-verified; package-content-inventory-pending",
-        "sha512Base64": "kHme0X8psqtqDweqVail2DRkOWPJYpHg/Ij1Xch+SiU8fLbrDnmmYBAplEIU9Uf47at56kVaUBuXURcjUaW4/A==",
-        "sourceCommit": "e6aeff4eaafa3918d4a27db2dcf5aba43cc3443c"
-      }
-    ],
     "iosManifest": {
       "status": "official-package-inspected; custom-manifest-strategy-pending",
       "id": "Microsoft.NET.Sdk.iOS.Manifest-10.0.100",
-      "version": "26.5.10301",
-      "sha512Base64": "ceKGsk+2inkEGdaDCmzhCxoqeMCwGxBWYzmBQctdG6gKZN1R0R4VPZhciYBto/hhDOvMnf25uMYJe8n1t2dL1Q==",
-      "sourceCommit": "e6aeff4eaafa3918d4a27db2dcf5aba43cc3443c",
+      "version": "27.0.10722",
+      "sha512Base64": "E67WwID69ZQmMd0fs8OFeExzyso/7rJk7QfIkK+fs+cEQj6e2s/hUA/iPtP36Li08YZVp8L7iY6Uk+zmfdU5Ww==",
+      "sourceCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3",
       "observedWorkloadId": "ios",
       "observedPlatformAliases": ["win-x64", "win-x86", "win-arm64"],
-      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.net.sdk.ios.manifest-10.0.100/26.5.10301/microsoft.net.sdk.ios.manifest-10.0.100.26.5.10301.nupkg"
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.net.sdk.ios.manifest-10.0.100/27.0.10722/microsoft.net.sdk.ios.manifest-10.0.100.27.0.10722.nupkg"
     },
+    "iosPackages": [
+      {
+        "id": "Microsoft.iOS.Sdk.net10.0_27.0",
+        "version": "27.0.10722",
+        "status": "catalog-hash-verified; package-content-inventory-pending",
+        "sha512Base64": "m9U/lC+YkzTEjAso+yIpZ7dHFmPDMgwhMtaHCSqYOizeZfn9lu0s546aCgM6hq+/9yELtvEocWh57xENxdWw8w==",
+        "sourceCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3"
+      },
+      {
+        "id": "Microsoft.iOS.Ref.net10.0_27.0",
+        "version": "27.0.10722",
+        "status": "catalog-hash-verified; package-content-inventory-pending",
+        "sha512Base64": "0pdbBbvdrXCTic4GQQXpLpIa8DA4yEzAJfKnknh3407Y5jZQQ5AGkChjPR2WVpB32UaISIrF00HPTzsRPyfMQQ==",
+        "sourceCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3"
+      },
+      {
+        "id": "Microsoft.iOS.Runtime.ios.net10.0_27.0",
+        "version": "27.0.10722",
+        "status": "catalog-hash-verified; package-content-inventory-pending",
+        "sha512Base64": "6zr3LlafjLDeC1rriAo8s76zSNpKMSDm6jITuZnmEVz1K3lCK98/V//CLWTrZp9BrF4XPn6hHQl0Ny/h3xJ7Tw==",
+        "sourceCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3"
+      },
+      {
+        "id": "Microsoft.iOS.Runtime.ios-arm64.net10.0_27.0",
+        "version": "27.0.10722",
+        "status": "catalog-hash-verified; package-content-inventory-pending",
+        "sha512Base64": "DcaRnBwaN/IzVqc++E2VCCCqVJFXnqSvGUy8g7yS1YEYwu104UKBQPunygAOmTO4V3pBVnydIXjy44Q6EQjCnA==",
+        "sourceCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3"
+      }
+    ],
     "monoRuntime": {
-      "status": "unresolved",
+      "status": "Mac pack provenance observed; matching runtime source and Linux compiler configuration unresolved",
+      "macHostAotPack": {
+        "id": "Microsoft.NETCore.App.Runtime.AOT.osx-arm64.Cross.ios-arm64",
+        "version": "10.0.12",
+        "sha512Base64": "DZDjJn6gv9FrMMBzZljCK+XVsloXzQosWgFNiQ53jiwogf4LSxgVrcFFpH7rL8Okq+CveVZFxuMd+fYir/zOtw==",
+        "sourceCommit": "95017c711e6afc1085133d440e42b4bd78155701",
+        "evidence": "Evaluated compiler path only; no verified execution."
+      },
+      "deviceRuntimePack": {
+        "id": "Microsoft.NETCore.App.Runtime.Mono.ios-arm64",
+        "version": "10.0.12",
+        "sha512Base64": "Pbby0nRsy/2I7eK9UnGAgqjWxUqAVNbBMTiRaPTE0aW1WlHm8Qck2FpQE3eIatn0PrO5rUMLoWmJgIn12pi0og==",
+        "sourceCommit": "95017c711e6afc1085133d440e42b4bd78155701"
+      },
       "requiredEvidence": [
-        "exact source commit used by the selected device runtime",
-        "AOT compiler configuration and target offsets",
-        "LLVM revision and selected AOT mode"
+        "exact runtime source revision traced from the selected device runtime",
+        "executed AOT command, response files, target offsets, and LLVM mode",
+        "Linux host compiler configuration and target artifact inspection"
       ]
     },
     "appleSdk": {
       "status": "user-supplied-only; legal-and-provenance-review-pending",
-      "xcodeVersion": "26.6",
-      "iosSdkFamily": "26.5",
+      "xcodeVersion": "27.0",
+      "xcodeBuild": "27A266a",
+      "iosSdkVersion": "27.0",
       "redistribution": "blocked-until-reviewed"
     },
     "omarchyAppleDev": {
@@ -103,11 +121,24 @@
       ]
     }
   },
+  "referenceMac": {
+    "status": "pre-AOT evaluation trace; provisioning blocked",
+    "macos": "26.7.1 (25G241)",
+    "architecture": "arm64",
+    "reportSha256": "ac3b139e1f3fd0706e3781867da562b0df1a0ccca698c13c52bf6114200c802d",
+    "binlogSha256": "0c7db97cf77264b0465825a63c4c5e58cd4bcb086f6bd3c5c73d922563dbcdb7",
+    "observedAotCompilerPath": "Microsoft.NETCore.App.Runtime.AOT.osx-arm64.Cross.ios-arm64/10.0.12/tools/mono-aot-cross",
+    "limitations": [
+      "The capture used ambient dotnet and recorded an executable path as dotnet_root.",
+      "The build failed at provisioning-profile discovery before verified AOT execution.",
+      "Raw source artifacts are local-only and ignored."
+    ]
+  },
   "acceptance": {
     "requiredBeforeAcceptedLock": [
-      "reference Mac capture",
+      "corrected clean reference-Mac capture through executed AOT",
       "complete package hashes and signatures",
-      "effective workload graph",
+      "effective Linux workload graph",
       "runtime and compiler provenance",
       "Apple SDK build metadata",
       "backend revision and host dependency inventory"

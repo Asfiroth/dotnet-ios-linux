@@ -25,7 +25,7 @@ The first technical success is an unsigned minimal UIKit application. The first 
 | Microsoft packs | Reuse official SDK, reference, and device runtime packs | Inventory executable formats and host-specific dependencies |
 | AOT | Build/package a Linux-hosted Mono cross compiler for iOS arm64 | ABI compatibility, complete compilation, link, and runtime behavior |
 | Xcode | Synthetic layout selected by `DEVELOPER_DIR` | Discovery, version parsing, and tool lookups at the pinned macios revision |
-| Darwin backend | Reuse pinned omarchy-apple-dev components | Exact compatibility with the chosen 26.6/26.5 toolchain |
+| Darwin backend | Reuse pinned omarchy-apple-dev components | Exact compatibility with the chosen 27.0 toolchain |
 | Uno environment check | Stock binary with a custom manifest | Linux iOS check runs rather than being silently filtered out |
 | IDE | Stock Rider with canonical CLI | Evaluation and build; run/debug are separate gates |
 
@@ -42,16 +42,16 @@ Earlier proposals for workload ID `ios-linux` and a separate `~/.dotnet-ios-linu
 | Runtime | Mono with device AOT; no JIT dependency |
 | Configuration | Release first; Debug compatibility investigated separately |
 | Application | Minimal UIKit app before Uno |
-| Apple toolchain | Xcode 26.6 / iPhoneOS 26.5 SDK family |
+| Apple toolchain | Xcode 27.0 / iPhoneOS 27.0 SDK family |
 | Device | One recorded physical iPhone model and OS build, connected by USB |
 | Outputs | Unsigned `.app`, then development-signed `.app`; `.ipa` when needed by deployment |
 | Build host independence | No remote Mac build service after SDK acquisition |
 
-Candidate baseline inherited from the discussion: .NET SDK `10.0.302`, workload set `10.0.302.0`, and macios package version `26.5.10301`. These are **requested candidate pins, not a verified compatibility matrix**. M0 must confirm the exact released artifacts, package contents, and working Mac configuration. Record discrepancies and resolve them before declaring a baseline; do not silently substitute newer versions.
+The active candidate baseline was rebaselined on 2026-10-17 to the supplied Mac reference: .NET SDK `10.0.402`, workload set `10.0.401.1`, macios package version `27.0.10722`, and Xcode/iPhoneOS SDK family `27.0`. These pins are observed on the reference Mac and their released artifacts are available, but remain **unverified for the Linux host**. M0 must confirm the complete package graph, host-tool behavior, actual AOT invocation, and runtime provenance before declaring a compatible baseline. Preserve the superseded `10.0.302` / `26.5.10301` evidence as historical receipts; do not mix the two graphs.
 
 `toolchain.lock.json` will record the SDK version and hash, SDK feature band, workload installation mode/set, manifest IDs and versions, every package ID/version/hash, runtime source commit, compiler configuration, LLVM revision, Apple SDK version/build/hash, Xcode metadata, omarchy revision, downstream patches, signing/deployment tool versions, uno-check version, Rider version, and host dependencies. The runtime commit must be traced to the selected device runtime, not inferred solely from the SDK version.
 
-Keep SDK version, SDK feature band, manifest package suffix, manifest version, workload-set version, iOS SDK version, and deployment target distinct. For example, SDK `10.0.302` belongs to feature band `10.0.300`; this alone does not establish which manifest package suffix or fallback directory the distribution consumes. Inspect the selected SDK's behavior rather than copying the earlier example path `sdk-manifests/10.0.100` blindly.
+Keep SDK version, SDK feature band, manifest package suffix, manifest version, workload-set version, iOS SDK version, and deployment target distinct. For example, SDK `10.0.402` belongs to feature band `10.0.400`; this alone does not establish which manifest package suffix or fallback directory the distribution consumes. Inspect the selected SDK's behavior rather than copying a path blindly.
 
 ### Non-goals for the first MVP
 

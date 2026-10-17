@@ -29,6 +29,7 @@ artifacts/
 *.key
 secrets/
 receipts/private/
+macios-references/
 
 # OS files
 .DS_Store

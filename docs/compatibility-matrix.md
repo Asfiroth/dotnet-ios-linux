@@ -6,12 +6,12 @@ requested input exists; it does not mean it works on Linux.
 | Area | Candidate | Evidence state | Required next evidence |
 | --- | --- | --- | --- |
 | Linux host | EndeavourOS/Arch x86_64, glibc | observed | Full M0 inventory and disposable SDK run |
-| .NET SDK | 10.0.302 / feature band 10.0.300 | source availability verified | Download hash verification and reference-Mac parity |
-| macios | 26.5.10301 / Xcode 26.6 | release and commit verified | Mac package graph, tasks, and binlog |
-| Workload set | CLI 10.0.302.0 / package 10.302.0 | package inspected; declares `10.0.100` manifest suffix | Effective install mode and lifecycle experiments |
+| .NET SDK | 10.0.402 / feature band 10.0.400 | source availability verified | Download hash verification and reference-Mac parity |
+| macios | 27.0.10722 / Xcode 27.0 | release and package commits verified | Clean Mac AOT invocation and package graph |
+| Workload set | CLI 10.0.401.1 / package 10.401.1 | package inspected; declares `10.0.100` manifest suffix | Effective install mode and lifecycle experiments |
 | iOS workload | `ios` | official manifest inspected; Linux mapping absent | One effective Linux-compatible definition |
 | Mono device AOT | Linux x64 host to iOS arm64 | unverified | Runtime commit, compiler build, object inspection |
-| Apple SDK | Xcode 26.6 / iPhoneOS 26.5 family | user-supplied only | Legal review, source metadata, hashes |
+| Apple SDK | Xcode 27.0 / iPhoneOS 27.0 family | user-supplied only | Legal review, source metadata, hashes |
 | Darwin backend | omarchy-apple-dev components | unverified | Pinned revision and command-contract evidence |
 | Signing and USB deployment | development identity and paired iPhone | not started | Trust-boundary policy and private-environment receipts |
 | Uno and Rider | stock consumers | not started | Separate consumer-gate receipts |
@@ -26,11 +26,12 @@ requested input exists; it does not mean it works on Linux.
 
 ## M0 Observations
 
-- The downloaded .NET SDK `10.0.302` hash matches official release metadata and
-  runs in an isolated temporary home.
-- Its unmodified, workload-free Linux evaluation reaches workload resolution,
+- The superseded .NET SDK `10.0.302` candidate is preserved under receipt-linked
+  historical evidence; it is not part of the active baseline.
+- The active .NET SDK `10.0.402` hash matches official release metadata and
+  runs in an isolated temporary home. Its unmodified, workload-free Linux evaluation reaches workload resolution,
   then reports missing `wasm-tools` rather than an iOS workload. This is an
   observation to classify with a Mac reference trace, not a workaround target.
-- The official iOS manifest package exposes `ios` and Windows SDK aliases, but
+- The active official iOS manifest package exposes `ios` and Windows SDK aliases, but
   no Linux host mapping. The project-owned manifest/replacement decision remains
   unresolved.

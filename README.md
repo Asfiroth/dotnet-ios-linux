@@ -18,7 +18,7 @@ Read [SPEC.md](SPEC.md) for architecture, implementation requirements, milestone
 
 ## First target
 
-Linux x86_64, initially EndeavourOS/Arch; .NET 10; `net10.0-ios`; `ios-arm64`; Mono; physical iPhone over USB; Xcode 26.6 / iOS 26.5 SDK family. The inherited .NET SDK `10.0.302`, workload set `10.0.302.0`, and macios `26.5.10301` are candidate pins to verify against the known-working Mac installation before implementation.
+Linux x86_64, initially EndeavourOS/Arch; .NET 10; `net10.0-ios`; `ios-arm64`; Mono; physical iPhone over USB; Xcode 27.0 / iOS 27.0 SDK family. The active candidate baseline is .NET SDK `10.0.402`, workload set `10.0.401.1`, and macios `27.0.10722`, selected from the supplied Mac reference. Linux compatibility remains unverified.
 
 Simulator support, NativeAOT, CoreCLR, wireless deployment, managed debugging, hot reload, and App Store distribution are outside the first MVP.
 
