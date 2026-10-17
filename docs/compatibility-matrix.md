@@ -7,13 +7,13 @@ requested input exists; it does not mean it works on Linux.
 | --- | --- | --- | --- |
 | Linux host | EndeavourOS/Arch x86_64, glibc | observed | Full M0 inventory and disposable SDK run |
 | .NET SDK | 10.0.402 / feature band 10.0.400 | source availability verified | Download hash verification and reference-Mac parity |
-| macios | 27.0.10722 / Xcode 27.0 | release and package commits verified | Clean Mac AOT invocation and package graph |
+| macios | 27.0.10722 / Xcode 27.0 | release/package commits and explicit Mac inventory verified; HelloIos blocked before AOT | Successful profile-selected Mac AOT invocation and package graph |
 | Workload set | CLI 10.0.401.1 / package 10.401.1 | package inspected; declares `10.0.100` manifest suffix | Effective install mode and lifecycle experiments |
 | iOS workload | `ios` | official manifest inspected; Linux mapping absent | One effective Linux-compatible definition |
 | Mono device AOT | Linux x64 host to iOS arm64 | unverified | Runtime commit, compiler build, object inspection |
 | Apple SDK | Xcode 27.0 / iPhoneOS 27.0 family | user-supplied only | Legal review, source metadata, hashes |
 | Darwin backend | omarchy-apple-dev components | unverified | Pinned revision and command-contract evidence |
-| Signing and USB deployment | development identity and paired iPhone | not started | Trust-boundary policy and private-environment receipts |
+| Signing and USB deployment | development identity and paired iPhone | profile-selection route verified; execution not started | Private successful signing, installation, and launch receipts |
 | Uno and Rider | stock consumers | not started | Separate consumer-gate receipts |
 
 ## Claim Boundaries
@@ -35,3 +35,11 @@ requested input exists; it does not mean it works on Linux.
 - The active official iOS manifest package exposes `ios` and Windows SDK aliases, but
   no Linux host mapping. The project-owned manifest/replacement decision remains
   unresolved.
+- The explicit-dotnet Mac captures verify the active SDK/workload/Xcode baseline
+  and installed AOT/runtime pack directories. `HelloIos` stopped at
+  provisioning-profile discovery before AOT, native linking, or bundle output.
+- `AotProbe` compiled as an iOS-targeted class library and produced only managed
+  `AotProbe.dll`; it is not an AOT, native-output, or device-execution result.
+- The received reports reference binlogs written below the project directories,
+  not the supplied capture directories. The hardened capture script now uses an
+  absolute private output path, requires the binlog, and returns build failure.

@@ -42,7 +42,7 @@ cd HelloIos
 dotnet build -f net10.0-ios -r ios-arm64 -c Release
 ```
 
-Setup will also provide the shim environment and package-source configuration. Signing requires a configured development identity and provisioning profile. Stock `uno-check` will use the distribution's custom manifest. Normal MSBuild `Run` integration is planned after separate signing, installation, and launch have been proven.
+Setup will also provide the shim environment and package-source configuration. Signing requires a configured development identity and provisioning profile. For a private Mac build, standard `CodesignKey` and `CodesignProvision` selectors may be set in local project configuration or passed as MSBuild properties; selectors must be redacted from shared evidence, and profiles or credentials must never be passed as arguments. Stock `uno-check` will use the distribution's custom manifest. Normal MSBuild `Run` integration is planned after separate signing, installation, and launch have been proven.
 
 ## Implementation starts here
 

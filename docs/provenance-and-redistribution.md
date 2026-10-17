@@ -25,10 +25,19 @@ repository.
 
 ## Sensitive material
 
-Private keys, profiles, tokens, pairing records, raw UDIDs, unsanitized
+Provisioning-profile files, contents, encoded representations, private keys,
+certificates, passwords, tokens, pairing records, raw UDIDs, unsanitized
 binlogs, and diagnostic dumps are secrets or sensitive operational records.
 They must not be committed, passed as command-line arguments, or emitted by
 capture scripts.
+
+The standard macios `CodesignProvision` property is an identifier selector, not
+profile material. A profile name or UUID selector may be supplied in private
+project configuration or with `-p:CodesignProvision=<selector>` for a local
+build. It must never contain a profile path, file content, encoded profile, or
+credential. `CodesignKey` identity selectors follow the same local-only rule.
+Capture reports and committed receipts must redact selector values; raw logs
+and binlogs remain private local artifacts.
 
 ## Project license
 

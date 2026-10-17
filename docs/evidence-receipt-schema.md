@@ -15,7 +15,9 @@ stored at `receipts/<milestone>/<receipt-id>.json` and validated against
 Statuses are `passed`, `failed`, `blocked`, or `superseded`. A failed attempt
 remains a failed receipt; a later success receives a new receipt.
 
-Raw binlogs, Apple SDK files, credentials, provisioning profiles, device
-identifiers, pairing records, and private logs are local artifacts and must not
-be committed. The receipt records a sanitized reference and, where possible,
-the local artifact hash.
+Raw binlogs, Apple SDK files, credentials, provisioning-profile files or
+contents, device identifiers, pairing records, and private logs are local
+artifacts and must not be committed. A `CodesignProvision` profile-name or UUID
+selector is permitted only as a redacted standard build-property reference; it
+must never be recorded as a profile path, content, or credential. The receipt
+records a sanitized reference and, where possible, the local artifact hash.
