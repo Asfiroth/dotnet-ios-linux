@@ -1,13 +1,36 @@
 # dotnet-ios-linux project specification
 
-Status: experimental M2–M9 device MVP passed; root bootstrap candidate under validation.
+Status: experimental; private/local M2–M9 device-path evidence is recorded,
+sanitized receipt publication is pending, and the root bootstrap remains a
+candidate under validation.
 Date: 2026-10-17; last updated 2026-10-20.
 Target host: glibc Linux x86_64; current evidence host is EndeavourOS/Arch.
-Decision basis: the final decisions in “Linux Mac Development Setup,” conversation `6a68da62-2fbc-83eb-ad21-0f2dd79c7ce6`.
+Decision basis: accepted [architecture decision records](decisions/README.md).
+The “Linux Mac Development Setup” conversation
+`6a68da62-2fbc-83eb-ad21-0f2dd79c7ce6` is historical input, not the current
+decision record.
+
+## How to read this document
+
+This specification is the normative architecture, scope, and acceptance-policy
+document. It does not itself prove an experimental result.
+
+- The [compatibility matrix](status/compatibility-matrix.md) is the concise
+  current-support source and labels unpublished evidence explicitly.
+- [Decision records](decisions/README.md) preserve why accepted architectural
+  choices were made.
+- The [evidence area](evidence/README.md) defines receipt publication and keeps
+  historical observations distinct from auditable records.
+- The root [README](../README.md) and
+  [operator runbook](runbooks/installation-and-device-troubleshooting.md) are
+  the operational entry points.
 
 ## 1. Outcome and architectural rule
 
-Build an ordinary .NET iOS application on Linux, produce a development-signed application bundle, install it over USB, and launch it on a physical iPhone. After initial setup, developers use `dotnet`, MSBuild, Rider, and stock `uno-check` through their existing interfaces.
+Build an ordinary .NET iOS application on Linux, produce a development-signed
+application bundle, install it over USB, and launch it on a physical iPhone. The
+intended post-setup workflow uses ordinary `dotnet` and MSBuild; Rider and stock
+`uno-check` are separate consumer goals and are not yet demonstrated.
 
 **Compatibility before customization:** when upstream expects a workload, SDK pack, file, executable, environment variable, or build target, reproduce that interface before changing upstream code. Fork only where a host dependency cannot be satisfied by configuration, a compatible implementation, or a narrowly scoped shim.
 
@@ -26,8 +49,12 @@ The first technical success is an unsigned minimal UIKit application. The first 
 | AOT | Package the exact LLVM-enabled Linux-hosted Mono cross compiler for iOS arm64 | Full app link and repeated physical-device probes passed |
 | Xcode | Synthetic layout selected by `DEVELOPER_DIR` | Pinned macios discovery/native link passed; broader Xcode tool coverage remains |
 | Darwin backend | Reuse pinned omarchy-apple-dev components | Minimal Xcode 27 tool, signing, and deployment slice passed |
-| Uno environment check | Stock binary with a custom manifest | Linux iOS check runs rather than being silently filtered out |
-| IDE | Stock Rider with canonical CLI | Evaluation and build; run/debug are separate gates |
+| Uno environment check | Target: stock binary with a custom manifest | Pending qualification: Linux iOS check must run rather than be silently filtered out |
+| IDE | Stock Rider with canonical CLI | Target: evaluation/build; Run/debug remain separate gates |
+
+Unless a row links to a published receipt, its completed-evidence wording refers
+to private/local observations summarized in the status matrix, not independently
+auditable public evidence.
 
 Earlier proposals for workload ID `ios-linux` and a separate `~/.dotnet-ios-linux` SDK installation are superseded. `dotnet-ios-linux` remains the project/bootstrap name. No global operating-system spoofing is permitted.
 
@@ -47,7 +74,20 @@ Earlier proposals for workload ID `ios-linux` and a separate `~/.dotnet-ios-linu
 | Outputs | Unsigned `.app`, then development-signed `.app`; `.ipa` when needed by deployment |
 | Build host independence | No remote Mac build service after SDK acquisition |
 
-The active candidate baseline was rebaselined on 2026-10-17 to the supplied Mac reference: .NET SDK `10.0.402`, workload set `10.0.401.1`, macios package version `27.0.10722`, Xcode `27.0 (27A266a)`, and iPhoneOS SDK `27.0 (24A430)`. Linux now verifies SDK discovery, the complete direct workload package graph, workload lifecycle, matched LLVM AOT execution, native compilation/linking, unsigned bundling, direct development signing, USB installation, clean and incremental manual launches, cold relaunch, visible UI, and deterministic runtime probes for the minimal UIKit application. Real Android, MAUI Android, and Wasm workloads survived an iOS install/uninstall cycle in a disposable copy of the canonical SDK. Automated launch, negative deployment paths, Rider, uno-check, and Uno remain unverified. Preserve the superseded `10.0.302` / `26.5.10301` evidence as historical receipts; do not mix the two graphs.
+The active candidate baseline was rebaselined on 2026-10-17 to the supplied Mac
+reference: .NET SDK `10.0.402`, workload set `10.0.401.1`, macios package
+version `27.0.10722`, Xcode `27.0 (27A266a)`, and iPhoneOS SDK `27.0 (24A430)`.
+Private/local evidence records SDK discovery, the complete direct workload graph,
+workload lifecycle, matched LLVM AOT execution, native compilation/linking,
+unsigned bundling, direct development signing, USB installation, clean and
+incremental manual launches, cold relaunch, visible UI, and deterministic runtime
+probes for the minimal UIKit application. Real Android, MAUI Android, and Wasm
+workloads also survived an iOS install/uninstall cycle in a disposable canonical
+SDK copy. Those observations are summarized in the status matrix but remain
+unauditable until sanitized receipts are published. Automated launch, negative
+deployment paths, Rider, uno-check, and Uno remain unverified. Preserve the
+superseded `10.0.302` / `26.5.10301` material only as historical summary; do not
+mix the two graphs.
 
 `toolchain.lock.json` records the SDK version and hash, SDK feature band, workload installation mode/set, manifest IDs and versions, every direct package ID/version/hash, runtime source commit, compiler and LLVM outputs, Apple SDK version/build/hash, Xcode metadata, backend revision, portable Swift/Python dependencies, signing/deployment tools, and remaining evidence gaps. The runtime commit is traced to the selected device runtime rather than inferred solely from the SDK version.
 
@@ -63,6 +103,9 @@ Keep SDK version, SDK feature band, manifest package suffix, manifest version, w
 - Broad MAUI support. Minimal Uno validation follows the UIKit device proof; the production ChambaXtra application is a later integration target.
 
 ## 4. Architecture and responsibilities
+
+Target architecture; the terminal path is the current consumer baseline, while
+Rider and stock uno-check remain separate unverified consumer gates:
 
 ```text
 Rider / terminal / stock uno-check + project manifest
@@ -121,7 +164,13 @@ Normal application `global.json` stays standard. Bootstrap workload operations r
 
 ### 4.3 Stock uno-check
 
-Ship a custom manifest derived from the pinned upstream schema, retaining relevant existing checks and adding Linux iOS coverage. Its workload entry must retain `workloadId: ios`, reference the selected effective manifest ID and package, and use the exact Linux platform token recognized by that uno-check release. Do not assume .NET RIDs and uno-check platform strings are interchangeable.
+The intended custom manifest must be derived from the pinned upstream schema,
+retain relevant existing checks, and add Linux iOS coverage. Its workload entry
+must retain `workloadId: ios`, reference the selected effective manifest ID and
+package, and use the exact Linux platform token recognized by that uno-check
+release. Do not assume .NET RIDs and uno-check platform strings are
+interchangeable. This consumer path remains unqualified until its positive and
+negative checks pass.
 
 Target invocation after installation:
 
@@ -337,17 +386,26 @@ Every release publishes the exact tested host, SDK/runtime/toolchain, device OS,
 
 ## 10. Remaining implementation backlog
 
-1. Run complete install/doctor/reinstall/uninstall from root `install.sh` in an isolated home when the authentic `Xcode_27.xip` is available.
-2. Add negative deployment cases without exposing credentials or device identifiers.
-3. Qualify stock uno-check against the installed `ios` graph.
-4. Qualify Rider evaluation/build against canonical `~/.dotnet` and the activation environment.
-5. Run an unchanged minimal Uno app through build, signing, installation, and device probes.
-6. Expand supported resource/native-library cases without broadening claims beyond evidence.
-7. Research automated CoreDevice launch only with an operator-approved personalized DDI.
+1. Publish bounded, sanitized receipts for the completed lifecycle, minimal-build,
+   signing/install/manual-launch, and bootstrap gates; connect each status claim
+   to a record in the evidence index.
+2. Run complete install/doctor/reinstall/uninstall from root `install.sh` in an
+   isolated home when the authentic `Xcode_27.xip` is available.
+3. Add negative deployment cases without exposing credentials or device identifiers.
+4. Qualify stock uno-check against the installed `ios` graph.
+5. Qualify Rider evaluation/build against canonical `~/.dotnet` and the activation environment.
+6. Run an unchanged minimal Uno app through build, signing, installation, and device probes.
+7. Expand supported resource/native-library cases without broadening claims beyond evidence.
+8. Research automated CoreDevice launch only with an operator-approved personalized DDI.
 
 ## 11. Source and evidence notes
 
-The conversation establishes product intent and candidate versions. It does not establish experimental results for this repository. Public sources were consulted on 2026-10-17; mutable branches and release pages must be replaced with pinned revision references during M0.
+The original conversation establishes product intent and candidate versions. It
+does not establish experimental results for this repository. The lock file and
+published receipts, not mutable upstream pages or narrative summaries, are the
+evidence-bearing references. Public links below provide upstream context; when a
+link informs a durable claim, record its immutable revision or package hash in
+the lock and its observed result in a receipt.
 
 - [omarchy-apple-dev](https://github.com/joshuaswarren/omarchy-apple-dev): backend reuse candidate and its own reported test matrix; not evidence of .NET support.
 - [.NET workload manifest design](https://github.com/dotnet/designs/blob/main/accepted/2020/workloads/workload-manifest.md): manifest concepts; validate implementation details in the pinned SDK.
@@ -356,4 +414,14 @@ The conversation establishes product intent and candidate versions. It does not 
 - [macios releases](https://github.com/dotnet/macios/releases): resolve the requested toolchain against actual release/package evidence before locking it.
 - [Uno environment checking](https://platform.uno/docs/articles/uno-check.html) and [manifest documentation](https://platform.uno/docs/articles/external/uno.check/manifests/README.html): custom-manifest integration entry points.
 
-The original planning baseline predated implementation. Current repository evidence now covers the pinned compiler build, project-owned SDK import, synthetic-Xcode discovery, complete direct workload package graph, isolated lifecycle and real Android/Wasm coexistence, official NuGet signatures, private build-only dependency license review, the private unsigned `HelloIos` M2–M6 gate, development signing, clean and incremental replacement installation, repeated manual launch/runtime probes, and cold relaunch. The complete root bootstrap run with the authentic archive, negative deployment gates, automated CoreDevice launch, Rider, uno-check, Uno, and any release-specific binary redistribution compliance bundle remain outstanding.
+The original planning baseline predated implementation. Private/local repository
+evidence reports the pinned compiler build, project-owned SDK import,
+synthetic-Xcode discovery, complete direct workload package graph, isolated
+lifecycle and real Android/Wasm coexistence, official NuGet signatures, private
+build-only dependency license review, the unsigned `HelloIos` M2–M6 gate,
+development signing, clean and incremental replacement installation, repeated
+manual launch/runtime probes, and cold relaunch. These remain unpublished until
+sanitized receipts are added. The complete root bootstrap run with the authentic
+archive, negative deployment gates, automated CoreDevice launch, Rider,
+uno-check, Uno, and any release-specific binary redistribution compliance bundle
+remain outstanding.

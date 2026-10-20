@@ -31,7 +31,9 @@ artifacts/
 secrets/
 signing-config.json
 *.signing-private.json
-receipts/
+# Private legacy capture quarantine at the repository root. Published sanitized
+# evidence records live under docs/evidence/receipts/.
+/receipts/
 # Legacy and generic private-capture quarantine. Canonical evidence output is
 # written outside the repository.
 macios-references/

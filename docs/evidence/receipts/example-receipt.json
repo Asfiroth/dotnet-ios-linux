@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "id": "EXAMPLE-REPOSITORY-VALIDATION",
+  "milestone": "M0",
+  "status": "passed",
+  "timestampUtc": "2026-10-20T00:00:00Z",
+  "repositoryRevision": "2218dc6aac5dc2b9a980e12b31c56adf40a5bcc0",
+  "toolchainLockSha256": "0601c269996b6681987bcfd8171390cc2a5ddb9ff76b5abd7bb4590fc65a68b5",
+  "host": {
+    "os": "example-linux",
+    "architecture": "x86_64",
+    "distribution": "redacted"
+  },
+  "commands": [
+    {
+      "command": "eng/evidence/validate-repository.sh",
+      "exitCode": 0,
+      "purpose": "Validate SDK-free repository contracts."
+    }
+  ],
+  "inputHashes": {
+    "toolchain.lock.json": "0601c269996b6681987bcfd8171390cc2a5ddb9ff76b5abd7bb4590fc65a68b5"
+  },
+  "outputHashes": {
+    "repository_validation=passed\n": "1b5d614a7ffd4ae313be329433c9e4571d7aa692e95f9d89318b01e14ff6cb59"
+  },
+  "expectedBehavior": "The SDK-free repository validation completes successfully.",
+  "observedBehavior": "Illustrative only: validation returned zero and emitted its pass marker.",
+  "limitations": [
+    "This is a format example, not evidence for an iOS build, signing, installation, or device claim."
+  ],
+  "nextDecision": "Replace this example with a dedicated sanitized receipt when publishing a real observation.",
+  "redaction": {
+    "performed": true,
+    "excluded": [
+      "private paths",
+      "credentials",
+      "device identifiers",
+      "raw logs"
+    ],
+    "notes": "Example values are intentionally non-identifying."
+  },
+  "localLogReferences": [
+    "operator-controlled log retained outside the repository"
+  ],
+  "example": true
+}

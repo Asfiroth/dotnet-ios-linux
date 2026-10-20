@@ -10,6 +10,12 @@ required_paths=(
     README.md
     toolchain.lock.json
     docs/specification.md
+    docs/status/compatibility-matrix.md
+    docs/evidence/receipt-schema.md
+    docs/evidence/receipt.schema.json
+    docs/evidence/receipts/index.md
+    docs/decisions/README.md
+    docs/runbooks/installation-and-device-troubleshooting.md
     src/msbuild
     src/packs
     src/shims
@@ -28,6 +34,10 @@ for path in "${legacy_paths[@]}"; do
 done
 
 python3 -m json.tool toolchain.lock.json >/dev/null
+python3 -m json.tool docs/evidence/receipt.schema.json >/dev/null
+while IFS= read -r -d '' receipt; do
+    python3 eng/evidence/validate-receipt.py "$receipt"
+done < <(find docs/evidence/receipts -type f -name '*.json' -print0)
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/contracts -p 'test_*.py' -q
 
 while IFS= read -r -d '' script; do

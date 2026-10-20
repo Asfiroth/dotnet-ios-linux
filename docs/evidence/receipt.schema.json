@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dotnet-ios-linux:evidence-receipt:1",
+  "title": "dotnet-ios-linux evidence receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "milestone",
+    "status",
+    "timestampUtc",
+    "repositoryRevision",
+    "toolchainLockSha256",
+    "host",
+    "commands",
+    "inputHashes",
+    "outputHashes",
+    "expectedBehavior",
+    "observedBehavior",
+    "limitations",
+    "nextDecision",
+    "redaction"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*(?:[-_][A-Z0-9]+)*$"
+    },
+    "milestone": {
+      "type": "string",
+      "pattern": "^M(?:0|[1-9]|10)$"
+    },
+    "status": {
+      "enum": ["passed", "failed", "blocked", "superseded"]
+    },
+    "timestampUtc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?Z$"
+    },
+    "repositoryRevision": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}(?:[a-f0-9]{24})?$"
+    },
+    "toolchainLockSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "architecture"],
+      "properties": {
+        "os": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "architecture": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "distribution": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kernel": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "notes": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "exitCode"],
+        "properties": {
+          "command": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "exitCode": {
+            "type": "integer"
+          },
+          "purpose": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "inputHashes": {
+      "$ref": "#/$defs/hashMap"
+    },
+    "outputHashes": {
+      "$ref": "#/$defs/hashMap"
+    },
+    "expectedBehavior": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "observedBehavior": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "nextDecision": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["performed", "excluded", "notes"],
+      "properties": {
+        "performed": {
+          "type": "boolean"
+        },
+        "excluded": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "notes": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "localLogReferences": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "example": {
+      "type": "boolean"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hashMap": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/sha256"
+      }
+    }
+  }
+}

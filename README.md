@@ -4,20 +4,23 @@ An experimental Linux host compatibility layer for building, signing, installing
 and launching an ordinary `net10.0-ios` application on a physical iPhone with
 standard .NET and MSBuild contracts.
 
-**Status: M2–M9 physical-device proof passed; bootstrap candidate under
-validation.** The unchanged `tests/HelloIos/HelloIos.csproj` passes trimming,
-LLVM AOT, native compilation/linking, unsigned bundling, development signing,
-USB replacement installation, manual launch, and cold relaunch on the pinned
-stack. Runtime probes cover generics, managed exceptions, P/Invoke, and a
-native-to-managed callback. Automated CoreDevice launch, Rider, stock
-`uno-check`, minimal Uno, and negative deployment coverage remain separate
-unpassed gates.
+**Status: private/local M2–M9 physical-device evidence is recorded; sanitized
+receipt publication is pending. The root bootstrap remains a candidate under
+validation.** In private local runs, the unchanged
+`tests/HelloIos/HelloIos.csproj` completed trimming, LLVM AOT, native
+compilation/linking, unsigned bundling, development signing, USB replacement
+installation, manual launch, and cold relaunch on the pinned stack. Runtime
+probes covered generics, managed exceptions, P/Invoke, and a native-to-managed
+callback. These observations are not independently auditable until receipts are
+published. Automated CoreDevice launch, Rider, stock `uno-check`, minimal Uno,
+and negative deployment coverage remain separate unpassed gates; see the
+[compatibility matrix](docs/status/compatibility-matrix.md).
 
-The root bootstrap and its SDK/workload ownership helpers now pass isolated
-install, update, list, restore, repair, uninstall, clean, reinstall, rollback,
-and real Android/Wasm coexistence exercises. A complete top-level bootstrap run
-is still pending because validation has the extracted `Xcode.app`, not the
-authentic `Xcode_27.xip` that the installer intentionally requires.
+Private/local isolated exercises report install, update, list, restore, repair,
+uninstall, clean, reinstall, rollback, and real Android/Wasm coexistence. A
+complete top-level bootstrap run is still pending because validation has the
+extracted `Xcode.app`, not the authentic `Xcode_27.xip` that the installer
+intentionally requires.
 
 ## Install
 
@@ -126,8 +129,17 @@ eng/evidence/validate-repository.sh
 
 Key references:
 
+- [`docs/README.md`](docs/README.md) — audience-oriented documentation map.
 - [`docs/specification.md`](docs/specification.md) — architecture, lifecycle,
   milestones, validation, and claim boundaries.
+- [`docs/status/compatibility-matrix.md`](docs/status/compatibility-matrix.md)
+  — current scope and evidence-publication state.
+- [`docs/decisions/README.md`](docs/decisions/README.md) — accepted
+  architecture decisions.
+- [`docs/runbooks/installation-and-device-troubleshooting.md`](docs/runbooks/installation-and-device-troubleshooting.md)
+  — installation and device failure triage.
+- [`docs/evidence/receipts/index.md`](docs/evidence/receipts/index.md) —
+  published evidence receipt index.
 - [`eng/toolchain/README.md`](eng/toolchain/README.md) — Apple SDK import,
   portable host tools, signing, and device actions.
 - [`eng/runtime/README.md`](eng/runtime/README.md) — matched Mono/LLVM compiler.
