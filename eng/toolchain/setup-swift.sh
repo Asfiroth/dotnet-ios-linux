@@ -1,92 +1,118 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
+readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+. "$script_dir/../install/download-verified.sh"
+
+readonly swift_version="6.4.0"
 readonly swift_url="https://download.swift.org/swift-6.4.0-release/ubi10/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE-ubi10.tar.gz"
 readonly swift_sha256="50863678e3bafd91fcbc94c0bb76610bab37c1ee01e335fc7d8616904e03e19a"
-readonly patchelf_url="https://archive.archlinux.org/packages/p/patchelf/patchelf-0.19.2-1-x86_64.pkg.tar.zst"
-readonly patchelf_sha256="3d4904a9d634de14b7dbacdfc521bf07bb5f20033707f5ff965416b9c17edc3b"
-readonly patchelf_sig_sha256="8ecf8549588134603d8aac75ddf1ab4d9d961b9abff2db3fd5b81d595d9fbc9b"
-readonly libxml_url="https://archive.archlinux.org/packages/l/libxml2-legacy/libxml2-legacy-2.13.9-2-x86_64.pkg.tar.zst"
-readonly libxml_sha256="aac28a52e81422935e3bfa44044030640c5d525ad8f65a9672a3ab7139974652"
-readonly libxml_sig_sha256="17ee7b04602a2d5b24f76332f8e146a55a54317a25f11bc17e88a36bdc6d64db"
+readonly ncurses_version="6.6"
+readonly ncurses_url="https://ftp.gnu.org/gnu/ncurses/ncurses-6.6.tar.gz"
+readonly ncurses_sha256="355b4cbbed880b0381a04c46617b7656e362585d52e9cf84a67e2009b749ff11"
+readonly libxml_version="2.13.9"
+readonly libxml_url="https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.9.tar.xz"
+readonly libxml_sha256="a2c9ae7b770da34860050c309f903221c67830c86e4a7e760692b803df95143a"
+readonly swift_binary_sha256="eb654eb03c86e363f3ff7a251f34aa0740efd49fcf260cd4c43041d20a60b52b"
+readonly swift_frontend_sha256="eb09157a34c8c030abff718d06b0a4b721b70dc4da910bbaaa4c2c0b5299d446"
+readonly clang_binary_sha256="3753e74f2ae853e3455fcf81877a0e1fd8906cd557e74aecf2b63108d3c097c3"
+readonly ncurses_output_sha256="c4cd27191189c942084a8973467baa5b83ab8067d951c4b7281ae56f61b82fe0"
+readonly panel_output_sha256="7d35183a1ee354e5c0307208129882ba8b18fce3f8348ee50c9fe62067e83387"
+readonly form_output_sha256="82fb1a593b08d9801b850a6341cd6dc3c6205a0919f6099012ff4970d5a15c09"
+readonly libxml_output_sha256="3a23f2967325395145b43da7b1901eeadb15060f36179ae441ecd419756961b0"
 readonly marker_name=".dotnet-ios-linux-swift"
 
 usage() {
     cat <<'EOF'
-Usage: setup-swift.sh --destination <directory> --cache <directory>
+Usage: setup-swift.sh --destination <directory> --cache <directory> [--offline]
 
-Stages the Xcode 27-matched Swift 6.4.0 Linux toolchain without installing an
-AUR package. Downloads are hash checked. The two Arch compatibility packages
-are also signature checked with the host pacman keyring. Existing unowned or
-mismatched destinations are never replaced.
+Stages the Xcode 27-matched Swift 6.4.0 UBI toolchain for a glibc x86-64
+host. Pinned ncurses 6.6 and libxml2 2.13.9 compatibility libraries are built
+from hash-verified upstream source and installed only in Swift's private runtime
+directory. No distro package manager, /usr mutation, or LD_LIBRARY_PATH is used.
 EOF
 }
 
 destination=""
 cache=""
+offline=false
 while (($#)); do
     case "$1" in
         --destination) destination="${2:?missing value for --destination}"; shift 2 ;;
         --cache) cache="${2:?missing value for --cache}"; shift 2 ;;
+        --offline) offline=true; shift ;;
         --help|-h) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
     esac
 done
 [[ -n "$destination" && -n "$cache" ]] || { usage >&2; exit 2; }
 
-for tool in bsdtar curl file pacman-key sha256sum; do
+for tool in curl file install ldd ln make mktemp mv realpath sha256sum tar; do
     command -v "$tool" >/dev/null || { printf '%s is required\n' "$tool" >&2; exit 1; }
 done
 [[ "$(uname -s) $(uname -m)" == "Linux x86_64" ]] || {
     printf 'this Swift lock supports Linux x86_64 only\n' >&2
     exit 1
 }
-for library in libncursesw.so libpanelw.so libformw.so; do
-    [[ -e "/usr/lib/$library" ]] || {
-        printf 'host ncurses library is missing: /usr/lib/%s\n' "$library" >&2
-        exit 1
-    }
-done
-
-mkdir -p "$cache"
-download() {
-    local url="$1" sha="$2" output="$3" part
-    if [[ -f "$output" ]] && printf '%s  %s\n' "$sha" "$output" | sha256sum --check --status; then
-        return
-    fi
-    [[ ! -e "$output" ]] || {
-        printf 'cached file has the wrong hash; refusing to replace it: %s\n' "$output" >&2
-        exit 1
-    }
-    part="$output.part.$$"
-    trap 'rm -f -- "$part"' RETURN
-    curl -fL "$url" -o "$part"
-    printf '%s  %s\n' "$sha" "$part" | sha256sum --check --status || {
-        printf 'download hash mismatch: %s\n' "$url" >&2
-        exit 1
-    }
-    mv "$part" "$output"
-    trap - RETURN
+getconf GNU_LIBC_VERSION >/dev/null 2>&1 || {
+    printf 'this Swift lock requires a glibc host\n' >&2
+    exit 1
 }
 
-swift_archive="$cache/swift-6.4.0-RELEASE-ubi10.tar.gz"
-patchelf_package="$cache/patchelf-0.19.2-1-x86_64.pkg.tar.zst"
-libxml_package="$cache/libxml2-legacy-2.13.9-2-x86_64.pkg.tar.zst"
-download "$swift_url" "$swift_sha256" "$swift_archive"
-download "$patchelf_url" "$patchelf_sha256" "$patchelf_package"
-download "$patchelf_url.sig" "$patchelf_sig_sha256" "$patchelf_package.sig"
-download "$libxml_url" "$libxml_sha256" "$libxml_package"
-download "$libxml_url.sig" "$libxml_sig_sha256" "$libxml_package.sig"
-pacman-key --verify "$patchelf_package.sig" "$patchelf_package" >/dev/null
-pacman-key --verify "$libxml_package.sig" "$libxml_package" >/dev/null
+[[ ! -L "$cache" ]] || { printf 'cache directory must not be a symlink: %s\n' "$cache" >&2; exit 1; }
+mkdir -p "$cache"
 
-marker="swift_sha256=$swift_sha256
-patchelf_sha256=$patchelf_sha256
-libxml2_legacy_sha256=$libxml_sha256
-host=Linux x86_64"
+swift_archive="$cache/swift-6.4.0-RELEASE-ubi10.tar.gz"
+ncurses_archive="$cache/ncurses-6.6.tar.gz"
+libxml_archive="$cache/libxml2-2.13.9.tar.xz"
+download_verified "$swift_url" sha256sum "$swift_sha256" "$swift_archive" "$offline"
+download_verified "$ncurses_url" sha256sum "$ncurses_sha256" "$ncurses_archive" "$offline"
+download_verified "$libxml_url" sha256sum "$libxml_sha256" "$libxml_archive" "$offline"
+
+provenance_marker="swift_version=$swift_version
+swift_sha256=$swift_sha256
+ncurses_version=$ncurses_version
+ncurses_sha256=$ncurses_sha256
+libxml2_version=$libxml_version
+libxml2_sha256=$libxml_sha256
+host=Linux x86_64 glibc"
 
 verify_toolchain() {
-    local root="$1" smoke actual
+    local root="$1" actual smoke smoke_exe name expected
+    for expected in \
+        "swift_version=$swift_version" \
+        "swift_sha256=$swift_sha256" \
+        "ncurses_version=$ncurses_version" \
+        "ncurses_sha256=$ncurses_sha256" \
+        "libxml2_version=$libxml_version" \
+        "libxml2_sha256=$libxml_sha256" \
+        "host=Linux x86_64 glibc"; do
+        grep -Fqx "$expected" "$root/$marker_name" || {
+            printf 'Swift stage provenance mismatch: %s\n' "$expected" >&2
+            return 1
+        }
+    done
+    printf '%s  %s\n' "$swift_binary_sha256" "$root/usr/bin/swift" | sha256sum --check --status || return 1
+    printf '%s  %s\n' "$swift_frontend_sha256" "$root/usr/bin/swift-frontend" | sha256sum --check --status || return 1
+    printf '%s  %s\n' "$clang_binary_sha256" "$root/usr/bin/clang" | sha256sum --check --status || return 1
+    while read -r name expected_hash; do
+        [[ -e "$root/usr/lib/swift/linux/$name" ]] || {
+            printf 'Swift private compatibility library is missing: %s\n' "$name" >&2
+            return 1
+        }
+        actual="$(sha256sum -b "$root/usr/lib/swift/linux/$name" | cut -d' ' -f1)"
+        [[ "$actual" == "$expected_hash" ]] && \
+            grep -Fqx "${name}_sha256=$expected_hash" "$root/$marker_name" || {
+            printf 'Swift private compatibility library failed integrity validation: %s\n' "$name" >&2
+            return 1
+        }
+    done <<EOF
+libncurses.so.6 $ncurses_output_sha256
+libpanel.so.6 $panel_output_sha256
+libform.so.6 $form_output_sha256
+libxml2.so.2 $libxml_output_sha256
+EOF
     actual="$("$root/usr/bin/swift" --version | head -n1)"
     [[ "$actual" == "Swift version 6.4 (swift-6.4-RELEASE)" ]] || {
         printf 'unexpected Swift version: %s\n' "$actual" >&2
@@ -96,10 +122,12 @@ verify_toolchain() {
         printf 'unexpected bundled Clang version\n' >&2
         return 1
     }
-    if ldd "$root/usr/bin/swift-frontend" | grep -q 'not found'; then
-        ldd "$root/usr/bin/swift-frontend" | grep 'not found' >&2
-        return 1
-    fi
+    for name in swift-package swift-frontend lld; do
+        if env -u LD_LIBRARY_PATH ldd "$root/usr/bin/$name" | grep -q 'not found'; then
+            env -u LD_LIBRARY_PATH ldd "$root/usr/bin/$name" | grep 'not found' >&2
+            return 1
+        fi
+    done
 
     smoke="$(mktemp -d "$(dirname "$root")/.swift-smoke.XXXXXX")"
     mkdir -p "$smoke/Sources/SwiftHostSmoke"
@@ -120,60 +148,103 @@ EOF
     rm -rf -- "$smoke"
 }
 
-if [[ -e "$destination" ]]; then
-    [[ -d "$destination" && -f "$destination/$marker_name" ]] || {
+if [[ -e "$destination" || -L "$destination" ]]; then
+    [[ -d "$destination" && ! -L "$destination" && -f "$destination/$marker_name" &&
+       ! -L "$destination/$marker_name" ]] || {
         printf 'existing destination is not owned by this setup: %s\n' "$destination" >&2
-        exit 1
-    }
-    [[ "$(cat "$destination/$marker_name")" == "$marker" ]] || {
-        printf 'existing destination has different provenance; refusing to replace it: %s\n' "$destination" >&2
         exit 1
     }
     verify_toolchain "$destination"
     printf 'swift_root=%s\n' "$(realpath "$destination")"
-    printf 'swift_version=6.4.0\nreused=true\n'
+    printf 'swift_version=%s\nreused=true\n' "$swift_version"
     exit 0
 fi
 
 parent="$(dirname "$destination")"
 mkdir -p "$parent"
 stage="$(mktemp -d "$parent/.swift.XXXXXX")"
-support="$(mktemp -d "$parent/.swift-support.XXXXXX")"
+support="$(mktemp -d "$cache/.swift-support.XXXXXX")"
 cleanup() {
     [[ -z "${stage:-}" || ! -e "$stage" ]] || rm -rf -- "$stage"
     [[ -z "${support:-}" || ! -e "$support" ]] || rm -rf -- "$support"
 }
 trap cleanup EXIT
 
-bsdtar -xzf "$swift_archive" --strip-components=1 -C "$stage"
-mkdir -p "$support/patchelf" "$support/libxml"
-bsdtar -xf "$patchelf_package" -C "$support/patchelf" usr/bin/patchelf
-bsdtar -xf "$libxml_package" -C "$support/libxml" \
-    usr/lib/libxml2.so.2 usr/lib/libxml2.so.2.13.9 \
-    usr/share/licenses/libxml2-legacy/Copyright
-patchelf="$support/patchelf/usr/bin/patchelf"
+tar -xzf "$swift_archive" --strip-components=1 --no-same-owner --no-same-permissions -C "$stage"
+mkdir -p "$support/source" "$support/ncurses-build" "$support/ncurses-prefix" \
+    "$support/libxml-build" "$support/libxml-prefix"
+tar -xzf "$ncurses_archive" --no-same-owner --no-same-permissions -C "$support/source"
+tar -xJf "$libxml_archive" --no-same-owner --no-same-permissions -C "$support/source"
 
-while IFS= read -r -d '' candidate; do
-    file -b "$candidate" | grep -q '^ELF ' || continue
-    "$patchelf" \
-        --replace-needed libncurses.so.6 libncursesw.so \
-        --replace-needed libpanel.so.6 libpanelw.so \
-        --replace-needed libform.so.6 libformw.so \
-        "$candidate"
-done < <(find "$stage/usr" -executable -type f \
-    \( -path '*/bin/*' -o -name '*.so*' \) \
-    ! \( -name '*.py' -o -name hwasan_symbolize \) -print0)
+support_prefix_map="$support=/usr/src/dotnet-ios-linux/swift-support"
+support_cc="$stage/usr/bin/clang"
+support_cflags="-O2 -g0 -ffile-prefix-map=$support_prefix_map -fdebug-prefix-map=$support_prefix_map"
+support_ldflags="-Wl,--build-id=none"
 
-cp -L "$support/libxml/usr/lib/libxml2.so.2" "$stage/usr/lib/swift/linux/libxml2.so.2"
-cp -L "$support/libxml/usr/lib/libxml2.so.2" "$stage/usr/lib/libxml2.so.2"
-mkdir -p "$stage/share/licenses/libxml2-legacy"
-cp "$support/libxml/usr/share/licenses/libxml2-legacy/Copyright" \
-    "$stage/share/licenses/libxml2-legacy/"
-printf '%s\n' "$marker" > "$stage/$marker_name"
+(
+    cd "$support/ncurses-build"
+    PATH="$stage/usr/bin:$PATH" CC="$support_cc" AR="$stage/usr/bin/llvm-ar" \
+        RANLIB="$stage/usr/bin/llvm-ranlib" CFLAGS="$support_cflags" \
+        LDFLAGS="$support_ldflags" SOURCE_DATE_EPOCH=1767225600 \
+        "$support/source/ncurses-$ncurses_version/configure" \
+        --prefix="$support/ncurses-prefix" \
+        --disable-widec --with-shared --without-normal --without-debug \
+        --without-ada --without-cxx --without-cxx-binding --without-manpages \
+        --without-tests --disable-db-install \
+        --with-default-terminfo-dir=/usr/share/terminfo \
+        --with-terminfo-dirs=/etc/terminfo:/lib/terminfo:/usr/share/terminfo
+    make --jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf 1)" libs
+    make install.libs
+)
+(
+    cd "$support/libxml-build"
+    PATH="$stage/usr/bin:$PATH" CC="$support_cc" AR="$stage/usr/bin/llvm-ar" \
+        RANLIB="$stage/usr/bin/llvm-ranlib" CFLAGS="$support_cflags" \
+        LDFLAGS="$support_ldflags" SOURCE_DATE_EPOCH=1767225600 \
+        "$support/source/libxml2-$libxml_version/configure" \
+        --prefix="$support/libxml-prefix" --without-python --without-lzma \
+        --without-zlib --without-iconv --without-readline --without-http \
+        --without-ftp --without-catalog --without-modules
+    make --jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf 1)"
+    make install
+)
+
+private_lib="$stage/usr/lib/swift/linux"
+for library in \
+    "$support/ncurses-prefix/lib/libncurses.so.6.6" \
+    "$support/ncurses-prefix/lib/libpanel.so.6.6" \
+    "$support/ncurses-prefix/lib/libform.so.6.6" \
+    "$support/libxml-prefix/lib/libxml2.so.2.13.9"; do
+    "$stage/usr/bin/llvm-objcopy" --remove-section=.comment "$library"
+done
+for name in ncurses panel form; do
+    install -m644 "$support/ncurses-prefix/lib/lib$name.so.6.6" "$private_lib/lib$name.so.6.6"
+    ln -s "lib$name.so.6.6" "$private_lib/lib$name.so.6"
+done
+install -m644 "$support/libxml-prefix/lib/libxml2.so.2.13.9" "$private_lib/libxml2.so.2.13.9"
+ln -s libxml2.so.2.13.9 "$private_lib/libxml2.so.2"
+install -m644 "$support/libxml-prefix/lib/libxml2.so.2.13.9" "$stage/usr/lib/libxml2.so.2.13.9"
+ln -s libxml2.so.2.13.9 "$stage/usr/lib/libxml2.so.2"
+
+mkdir -p "$stage/share/licenses/ncurses" "$stage/share/licenses/libxml2"
+install -m644 "$support/source/ncurses-$ncurses_version/COPYING" "$stage/share/licenses/ncurses/COPYING"
+install -m644 "$support/source/libxml2-$libxml_version/Copyright" "$stage/share/licenses/libxml2/Copyright"
+
+{
+    printf '%s\n' "$provenance_marker"
+    printf 'libncurses.so.6_sha256=%s\n' "$ncurses_output_sha256"
+    printf 'libpanel.so.6_sha256=%s\n' "$panel_output_sha256"
+    printf 'libform.so.6_sha256=%s\n' "$form_output_sha256"
+    printf 'libxml2.so.2_sha256=%s\n' "$libxml_output_sha256"
+} > "$stage/$marker_name"
 verify_toolchain "$stage"
-mv "$stage" "$destination"
+mv --no-clobber --no-target-directory "$stage" "$destination"
+[[ ! -e "$stage" ]] || {
+    printf 'Swift destination appeared during publication; refusing to replace it: %s\n' "$destination" >&2
+    exit 1
+}
 stage=""
 verify_toolchain "$destination"
 
 printf 'swift_root=%s\n' "$(realpath "$destination")"
-printf 'swift_version=6.4.0\nreused=false\n'
+printf 'swift_version=%s\nreused=false\n' "$swift_version"

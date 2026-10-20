@@ -5,11 +5,11 @@ requested input exists; it does not mean it works on Linux.
 
 | Area | Candidate | Evidence state | Required next evidence |
 | --- | --- | --- | --- |
-| Linux host | EndeavourOS/Arch x86_64, glibc | observed | Full M0 inventory and disposable SDK run |
-| .NET SDK | 10.0.402 / feature band 10.0.400 | source availability verified | Download hash verification and reference-Mac parity |
-| macios | 27.0.10722 / Xcode 27.0 | Linux SDK discovery, trim, LLVM AOT, native compile/link, bundle, development signing, USB installation, clean/incremental launch, and cold relaunch verified | Complete package inventory and broader app coverage |
-| Workload set | CLI 10.0.401.1 / package 10.401.1 | package inspected; declares `10.0.100` manifest suffix | Effective install mode and lifecycle experiments |
-| iOS workload | `ios` | official manifest inspected; Linux mapping absent | One effective Linux-compatible definition |
+| Linux host | glibc Linux x86_64; observed on EndeavourOS/Arch | SDK-free contracts, portable tool stages, isolated canonical-root lifecycle, and device path observed | Broader distro coverage |
+| .NET SDK | 10.0.402 / feature band 10.0.400 | archive hash verified; conflict-safe merge and real Android/Wasm coexistence passed | Complete root bootstrap with authentic Xcode archive |
+| macios | 27.0.10722 / Xcode 27.0 | Linux SDK discovery, trim, LLVM AOT, native compile/link, bundle, development signing, USB installation, clean/incremental launch, and cold relaunch verified | Broader app coverage |
+| Workload set | CLI 10.0.401.1 / package 10.401.1 | private `global.json` pin; update/install/list/restore/repair/uninstall/clean/reinstall and exact-package NuGet signature verification passed | Root bootstrap with authentic Xcode archive |
+| iOS workload | `ios` | deterministic unsigned official-ID derivative with complete hash-locked direct Linux graph | Stock uno-check and Rider consumers |
 | Mono device AOT | Linux x64 host to iOS arm64 | Runtime commit matched; clean and incremental `HelloIos` builds execute the LLVM compiler, consume both AotProbe objects, and pass repeated physical-device probes | Broader runtime and application coverage |
 | Apple SDK | Xcode `27.0 (27A266a)` / iPhoneOS `27.0 (24A430)` | user-supplied XIP hash and authentic SDK metadata verified; transactional SDK-only import passed | Redistribution/legal review remains separate; no SDK payload may ship |
 | Darwin backend | Linux Clang/LLD adapter for the minimal slice | synthetic queries, generated source compile, native link, canonical app output, final Mach-O inspection, signed-copy compatibility, and repeated device runtime pass | Broader tool coverage |
@@ -32,9 +32,10 @@ requested input exists; it does not mean it works on Linux.
   runs in an isolated temporary home. Its unmodified, workload-free Linux evaluation reaches workload resolution,
   then reports missing `wasm-tools` rather than an iOS workload. This is an
   observation to classify with a Mac reference trace, not a workaround target.
-- The active official iOS manifest package exposes `ios` and Windows SDK aliases, but
-  no Linux host mapping. The project-owned manifest/replacement decision remains
-  unresolved.
+- The active official iOS manifest package exposes `ios` and Windows SDK aliases,
+  but no Linux host mapping. The implemented unsigned local derivative keeps the
+  exact official ID/version while defining the hash-locked direct Linux device
+  graph; the authentic input's NuGet signatures are verified first.
 - The explicit-dotnet Mac captures verify the active SDK/workload/Xcode baseline
   and installed AOT/runtime pack directories. `HelloIos` stopped at
   provisioning-profile discovery before AOT, native linking, or bundle output.
@@ -105,3 +106,13 @@ requested input exists; it does not mean it works on Linux.
   manual launch and force-quit/cold relaunch displayed the same probe results;
   a redacted read-only observation saw foreground/process activity and no fatal
   report or crash activity. This completes the full M9 positive path.
+- The direct Linux workload graph contains 12 hash-locked official/project/feed
+  archives. An isolated SDK lifecycle passed update, install, list, restore,
+  repair, uninstall, clean, reinstall, and unchanged-project LLVM build. A
+  separate disposable copy of the real canonical SDK retained Android,
+  `maui-android`, and `wasm-tools` plus their shared packs after installing and
+  uninstalling this iOS graph.
+- All nine installed official graph archives, the authentic manifest input, and
+  the workload-set package pass NuGet author/repository signature verification.
+  The derivative and two project packages are intentionally unsigned and are
+  verified by deterministic hashes and explicit absence of `.signature.p7s`.

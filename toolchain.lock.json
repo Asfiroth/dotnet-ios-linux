@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "status": "active-candidate",
   "generatedAtUtc": "2026-10-20T00:00:00Z",
-  "purpose": "M2-M9 positive-path implementation candidate. Authentic Xcode 27 SDK import, synthetic-Xcode discovery, matched LLVM Linux-to-iOS AOT/native link, development signing, USB installation, clean and incremental rebuild launches, visible UI, deterministic runtime probes, and cold relaunch are verified.",
+  "purpose": "M2-M9 implementation candidate. The physical-device path and the isolated SDK/workload lifecycle are verified; the root bootstrap remains pending an end-to-end run with the authentic Xcode archive.",
   "projectLicense": {
     "spdx": "MIT",
     "file": "LICENSE",
@@ -34,62 +34,186 @@
       "source": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/10.0/releases.json"
     },
     "workloadSet": {
-      "status": "package-hash-verified; effective-installation-behavior-pending",
+      "status": "package-hash-verified; isolated update/install/restore/repair/uninstall/clean/reinstall lifecycle verified",
       "cliVersion": "10.0.401.1",
       "packageId": "Microsoft.NET.Workloads.10.0.400",
       "packageVersion": "10.401.1",
+      "sha256": "8828d2f982dfab382393bdddba39c3649df13c7bf9fc5607675c582e46f62730",
       "sha512Base64": "rSxOQ3DTzIJQ+dLLwB1ASR5N2tspp5eBTcGTolm32SroJ8J7K76k8R7FyfSaGf7aeEYWI8S6rbld6H0oX2clDA==",
       "sourceCommit": "a827f0e1063d9a33164ebaa738c161cc94c47532",
       "source": "https://www.nuget.org/packages/Microsoft.NET.Workloads.10.0.400/10.401.1",
-      "declaredManifestPackageSuffix": "10.0.100"
+      "declaredManifestPackageSuffix": "10.0.100",
+      "signatureReview": {
+        "status": "NuGet author and repository signatures verified with SDK 10.0.402",
+        "authorCertificateSha256": "9A1B131BEE0605433056A4EA3815478A8E177961A968C6C0027C1093D1FEB630",
+        "repositoryCertificateSha256": "1F4B311D9ACC115C8DC8018B5A49E00FCE6DA8E2855F9F014CA6F34570BC482D",
+        "offlinePolicy": "Exact package hash is mandatory; signature verification uses NuGet offline revocation mode so a cache-only install does not perform certificate-network access."
+      }
     },
     "macios": {
-      "status": "release-and-package-commit-verified; complete-package-inventory-pending",
+      "status": "release, package commit, and complete direct Linux iOS workload package inventory verified",
       "releaseTag": "dotnet-10.0.1xx-xcode27.0-10722",
       "packageCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3",
       "packageVersion": "27.0.10722",
       "source": "https://github.com/dotnet/macios/releases/tag/dotnet-10.0.1xx-xcode27.0-10722"
     },
     "iosManifest": {
-      "status": "official-package-inspected; custom-manifest-strategy-pending",
+      "status": "official package hash-verified; deterministic unsigned Linux derivative verified",
       "id": "Microsoft.NET.Sdk.iOS.Manifest-10.0.100",
       "version": "27.0.10722",
       "sha512Base64": "E67WwID69ZQmMd0fs8OFeExzyso/7rJk7QfIkK+fs+cEQj6e2s/hUA/iPtP36Li08YZVp8L7iY6Uk+zmfdU5Ww==",
       "sourceCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3",
       "observedWorkloadId": "ios",
       "observedPlatformAliases": ["win-x64", "win-x86", "win-arm64"],
-      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.net.sdk.ios.manifest-10.0.100/27.0.10722/microsoft.net.sdk.ios.manifest-10.0.100.27.0.10722.nupkg"
-    },
-    "iosPackages": [
-      {
-        "id": "Microsoft.iOS.Sdk.net10.0_27.0",
-        "version": "27.0.10722",
-        "status": "catalog-hash-verified; package-content-inventory-pending",
-        "sha512Base64": "m9U/lC+YkzTEjAso+yIpZ7dHFmPDMgwhMtaHCSqYOizeZfn9lu0s546aCgM6hq+/9yELtvEocWh57xENxdWw8w==",
-        "sourceCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3"
-      },
-      {
-        "id": "Microsoft.iOS.Ref.net10.0_27.0",
-        "version": "27.0.10722",
-        "status": "catalog-hash-verified; package-content-inventory-pending",
-        "sha512Base64": "0pdbBbvdrXCTic4GQQXpLpIa8DA4yEzAJfKnknh3407Y5jZQQ5AGkChjPR2WVpB32UaISIrF00HPTzsRPyfMQQ==",
-        "sourceCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3"
-      },
-      {
-        "id": "Microsoft.iOS.Runtime.ios.net10.0_27.0",
-        "version": "27.0.10722",
-        "status": "catalog-hash-verified; package-content-inventory-pending",
-        "sha512Base64": "6zr3LlafjLDeC1rriAo8s76zSNpKMSDm6jITuZnmEVz1K3lCK98/V//CLWTrZp9BrF4XPn6hHQl0Ny/h3xJ7Tw==",
-        "sourceCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3"
-      },
-      {
-        "id": "Microsoft.iOS.Runtime.ios-arm64.net10.0_27.0",
-        "version": "27.0.10722",
-        "status": "catalog-hash-verified; package-content-inventory-pending",
-        "sha512Base64": "DcaRnBwaN/IzVqc++E2VCCCqVJFXnqSvGUy8g7yS1YEYwu104UKBQPunygAOmTO4V3pBVnydIXjy44Q6EQjCnA==",
-        "sourceCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3"
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.net.sdk.ios.manifest-10.0.100/27.0.10722/microsoft.net.sdk.ios.manifest-10.0.100.27.0.10722.nupkg",
+      "signatureReview": {
+        "status": "official package NuGet author and repository signatures verified; deterministic derivative intentionally unsigned",
+        "authorCertificateSha256": "566A31882BE208BE4422F7CFD66ED09F5D4524A5994F50CCC8B05EC0528C1353",
+        "repositoryCertificateSha256": "1F4B311D9ACC115C8DC8018B5A49E00FCE6DA8E2855F9F014CA6F34570BC482D"
       }
-    ],
+    },
+    "linuxIosWorkload": {
+      "status": "direct Linux physical-device graph and complete package hashes verified; lifecycle passed in an isolated canonical-root copy",
+      "workloadId": "ios",
+      "platform": "linux-x64",
+      "featureBand": "10.0.400",
+      "workloadSet": "10.0.401.1",
+      "manifestVersion": "27.0.10722",
+      "signaturePolicy": {
+        "officialArchives": "All nine installed NuGet.org archives pass NuGet author/repository signature verification after their exact SHA-256 and SHA-512 checks.",
+        "officialAuthorCertificateSha256": "566A31882BE208BE4422F7CFD66ED09F5D4524A5994F50CCC8B05EC0528C1353",
+        "nugetRepositoryCertificateSha256": "1F4B311D9ACC115C8DC8018B5A49E00FCE6DA8E2855F9F014CA6F34570BC482D",
+        "localArchives": "The two project packages and unsigned manifest derivative intentionally contain no .signature.p7s; deterministic SHA-256/SHA-512 values are the local trust anchor.",
+        "verificationMode": "dotnet nuget verify --all with NUGET_CERT_REVOCATION_MODE=offline for cache-independent operation"
+      },
+      "graphPolicy": "The unsigned local derivative removes unsupported Mono iOS extends edges, selects only the net10 physical-device packs, adds the net10 26.0 SDK fallback used by library projects without TargetPlatformVersion, and adds the two project-owned SDK packs.",
+      "directPacks": [
+        "Microsoft.iOS.Sdk.net10.0_27.0",
+        "Microsoft.iOS.Sdk.net10.0_26.0",
+        "Microsoft.iOS.Ref.net10.0_27.0",
+        "Microsoft.iOS.Runtime.ios.net10.0_27.0",
+        "Microsoft.iOS.Runtime.ios-arm64.net10.0_27.0",
+        "Microsoft.iOS.Templates.net9",
+        "Microsoft.NETCore.App.Runtime.Mono.net10.ios-arm64",
+        "Microsoft.NET.Runtime.MonoAOTCompiler.Task.net10",
+        "Microsoft.NET.Runtime.MonoTargets.Sdk.net10",
+        "DotnetIosLinux.Sdk",
+        "DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64"
+      ],
+      "packages": [
+        {
+          "key": "ios-sdk-27",
+          "id": "Microsoft.iOS.Sdk.net10.0_27.0",
+          "version": "27.0.10722",
+          "origin": "nuget.org",
+          "sha256": "91a1b9f116eadf93e0ab37c6f763057351bfca6520c862d280da3b4551dba875",
+          "sha512Base64": "m9U/lC+YkzTEjAso+yIpZ7dHFmPDMgwhMtaHCSqYOizeZfn9lu0s546aCgM6hq+/9yELtvEocWh57xENxdWw8w==",
+          "installedArchive": "packs/Microsoft.iOS.Sdk.net10.0_27.0/27.0.10722/Microsoft.iOS.Sdk.net10.0_27.0.nupkg"
+        },
+        {
+          "key": "ios-sdk-26",
+          "id": "Microsoft.iOS.Sdk.net10.0_26.0",
+          "version": "26.0.11017",
+          "origin": "nuget.org",
+          "sha256": "f3b56ea63867c3001f55b7ea444769b9ac274dca045d96e1d4784bf1ce307a0e",
+          "sha512Base64": "cA6htlpskaeDzQO0i5v90HXpSwCB4C53VU+svpmvmIKKYe1f9VvsgR5by1Bct0UmXoGaJuL5hprLBbyOFhlYDw==",
+          "installedArchive": "packs/Microsoft.iOS.Sdk.net10.0_26.0/26.0.11017/Microsoft.iOS.Sdk.net10.0_26.0.nupkg"
+        },
+        {
+          "key": "ios-ref-27",
+          "id": "Microsoft.iOS.Ref.net10.0_27.0",
+          "version": "27.0.10722",
+          "origin": "nuget.org",
+          "sha256": "d095de949ca69e9f4f8ce0bde469f4bcc8f8df7677f4b2662e9f449c1972369b",
+          "sha512Base64": "0pdbBbvdrXCTic4GQQXpLpIa8DA4yEzAJfKnknh3407Y5jZQQ5AGkChjPR2WVpB32UaISIrF00HPTzsRPyfMQQ==",
+          "installedArchive": "packs/Microsoft.iOS.Ref.net10.0_27.0/27.0.10722/Microsoft.iOS.Ref.net10.0_27.0.nupkg"
+        },
+        {
+          "key": "ios-runtime-27",
+          "id": "Microsoft.iOS.Runtime.ios.net10.0_27.0",
+          "version": "27.0.10722",
+          "origin": "nuget.org",
+          "sha256": "c894c096c0a33f3659ebe1998d52cf649589359b9347ea894bb0796d02131604",
+          "sha512Base64": "6zr3LlafjLDeC1rriAo8s76zSNpKMSDm6jITuZnmEVz1K3lCK98/V//CLWTrZp9BrF4XPn6hHQl0Ny/h3xJ7Tw==",
+          "installedArchive": "packs/Microsoft.iOS.Runtime.ios.net10.0_27.0/27.0.10722/Microsoft.iOS.Runtime.ios.net10.0_27.0.nupkg"
+        },
+        {
+          "key": "ios-runtime-arm64-27",
+          "id": "Microsoft.iOS.Runtime.ios-arm64.net10.0_27.0",
+          "version": "27.0.10722",
+          "origin": "nuget.org",
+          "sha256": "176fe0b4dc2003ddcec45a1d558708d119bfbf1894bef4bca3977fec9f859253",
+          "sha512Base64": "DcaRnBwaN/IzVqc++E2VCCCqVJFXnqSvGUy8g7yS1YEYwu104UKBQPunygAOmTO4V3pBVnydIXjy44Q6EQjCnA==",
+          "installedArchive": "packs/Microsoft.iOS.Runtime.ios-arm64.net10.0_27.0/27.0.10722/Microsoft.iOS.Runtime.ios-arm64.net10.0_27.0.nupkg"
+        },
+        {
+          "key": "ios-templates-27",
+          "id": "Microsoft.iOS.Templates",
+          "version": "27.0.10722",
+          "origin": "nuget.org",
+          "sha256": "8ef35b6aa114bf299e1e7e0d3ea1df92ae306eb920d65509a0ac984c0832dc71",
+          "sha512Base64": "59wtQhjF3wwXGIiQA3tL6TGB+kcW8+HYmn1al6726KGdKKao63MnUZa4GDeDRXxEpwjQgPY/58rJo3SI5s+W/g==",
+          "installedArchive": "template-packs/microsoft.ios.templates.27.0.10722.nupkg"
+        },
+        {
+          "key": "mono-runtime-ios-arm64",
+          "id": "Microsoft.NETCore.App.Runtime.Mono.ios-arm64",
+          "version": "10.0.12",
+          "origin": "nuget.org",
+          "sha256": "7de6c3e79b717ad9218e22510650e48ddb1acb64c92cf6fe808dd9310b369ea3",
+          "sha512Base64": "Pbby0nRsy/2I7eK9UnGAgqjWxUqAVNbBMTiRaPTE0aW1WlHm8Qck2FpQE3eIatn0PrO5rUMLoWmJgIn12pi0og==",
+          "installedArchive": "packs/Microsoft.NETCore.App.Runtime.Mono.ios-arm64/10.0.12/Microsoft.NETCore.App.Runtime.Mono.ios-arm64.nupkg"
+        },
+        {
+          "key": "mono-aot-task",
+          "id": "Microsoft.NET.Runtime.MonoAOTCompiler.Task",
+          "version": "10.0.12",
+          "origin": "nuget.org",
+          "sha256": "cb2f254e0f5a8b07835694e21a380ebbe2bc3aa04b890fc1c9ce99aea9eeaee2",
+          "sha512Base64": "3H2mftzu5DLfd9EuljdKiUuBp51xhwfszAexxAzdidRcAfvIjsXQQdf9HTc31Kp9AkHFFGnXQPW5VXdGjqkZgw==",
+          "installedArchive": "packs/Microsoft.NET.Runtime.MonoAOTCompiler.Task/10.0.12/Microsoft.NET.Runtime.MonoAOTCompiler.Task.nupkg"
+        },
+        {
+          "key": "mono-targets-sdk",
+          "id": "Microsoft.NET.Runtime.MonoTargets.Sdk",
+          "version": "10.0.12",
+          "origin": "nuget.org",
+          "sha256": "44b835c5d92bc0ed037444de0fb5b5b560f68d531dca397412c1d40dfa0f900f",
+          "sha512Base64": "fEKppQZmL/rAiSMPFRQAHJB6ZVWVsIvkAQVzcN2jyQSWwYAJRX2mMGJEBQR4hGeAsF1QxrbBr1uNigOSTOCisg==",
+          "installedArchive": "packs/Microsoft.NET.Runtime.MonoTargets.Sdk/10.0.12/Microsoft.NET.Runtime.MonoTargets.Sdk.nupkg"
+        },
+        {
+          "key": "project-sdk",
+          "id": "DotnetIosLinux.Sdk",
+          "version": "0.1.0-preview.1",
+          "origin": "project",
+          "sha256": "3d3dda8923cf2fae46729104e3eb052ef486a349e0008d6d7b0b76f73dd37dcb",
+          "sha512Base64": "z5bkec5PyEDLisionV2DAO9yUiYK31UjDXOoMLGxTuFblRUeKbTSm0qNL0LRTb+pXNHE+BC15+mjkVx+NthQnQ==",
+          "feedFile": "DotnetIosLinux.Sdk.0.1.0-preview.1.nupkg",
+          "installedArchive": "packs/DotnetIosLinux.Sdk/0.1.0-preview.1/DotnetIosLinux.Sdk.nupkg"
+        },
+        {
+          "key": "project-aot",
+          "id": "DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64",
+          "version": "0.1.0-preview.1",
+          "origin": "local-build",
+          "sha256": "ffb98976196c515c2f3ad80f045a186c6817d54d07021e8b38bce482e46e075b",
+          "sha512Base64": "qF2UOQf2tCrL+S/Cv594MT2a1XA30wa0/sp39xAK9uIzUJsglDhd3eaTiZ7LqbvAMtKfp9/hQi9IigCmqjtvWQ==",
+          "feedFile": "DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64.0.1.0-preview.1.nupkg",
+          "installedArchive": "packs/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/0.1.0-preview.1/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64.nupkg"
+        },
+        {
+          "key": "derived-ios-manifest",
+          "id": "Microsoft.NET.Sdk.iOS.Manifest-10.0.100",
+          "version": "27.0.10722",
+          "origin": "unsigned-local-derivative",
+          "sha256": "08db16c8cee354a0014cccddf1b64402e37104a45dbc3d5298591b47b3565b13",
+          "sha512Base64": "arYfTD6granC+KZeYeXAHqRA6VvKA29AsVdVIdaREiz/9JHMYov3Mb9I9Qxe77khfu5KMEj1ztFeY2dZ08rfRw==",
+          "feedFile": "Microsoft.NET.Sdk.iOS.Manifest-10.0.100.27.0.10722.nupkg"
+        }
+      ],
+      "lifecycleEvidence": "Isolated SDK 10.0.402 root passed workload update, install, list, restore, repair, uninstall, clean, reinstall, and unchanged-project LLVM build. A disposable copy of the real canonical SDK preserved Android, maui-android, wasm-tools, and shared packs across iOS install/uninstall. SDK/workload ownership contracts cover conflicts, interrupted rollback, later-workload coexistence, and modified-file refusal."
+    },
     "monoRuntime": {
       "status": "matching runtime source, LLVM-enabled Linux compiler, macios HelloIos AOT/native link, development signing, USB installation, and full M9 clean/incremental physical-device runtime sequence verified locally",
       "sourceRepository": "https://github.com/dotnet/runtime.git",
@@ -235,7 +359,7 @@
       "requiredEvidence": []
     },
     "appleSdk": {
-      "status": "user-supplied XIP hash and SDK metadata verified; transactional SDK-only import passed; redistribution prohibited pending legal review",
+      "status": "user-supplied XIP hash and SDK metadata verified; transactional SDK-only import passed; Apple archive and SDK redistribution prohibited",
       "archiveName": "Xcode_27.xip",
       "archiveSha256": "6a270c53a5a0c5e0ac78125342d44c3cfff2716ec390373cd5e30834d80a67c3",
       "xcodeVersion": "27.0",
@@ -276,41 +400,35 @@
       "installPolicy": "Do not execute install-toolchain.sh wholesale. Its package, home-directory, Swift-SDK, and unpinned-Python mutations must be replaced by project-owned pinned staging steps.",
       "components": {
         "swift": {
-          "status": "verified in a project-owned Linux x86-64 stage",
+          "status": "portable project-owned Linux x86-64 stage and deterministic source-built compatibility libraries verified twice",
           "version": "6.4.0",
           "source": "https://download.swift.org/swift-6.4.0-release/ubi10/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE-ubi10.tar.gz",
           "sha256": "50863678e3bafd91fcbc94c0bb76610bab37c1ee01e335fc7d8616904e03e19a",
-          "aurRecipeCommit": "76ec647c95acf2d46b6f0b235660084d0bd69eb2",
-          "aurRecipeTree": "f0ffc75ef57db11414df22d4271014b0229fb4d8",
-          "aurPackageVersion": "6.4.0-2",
           "license": "Apache-2.0 with Runtime Library Exception",
-          "driftGuard": "The current AUR package is 6.4.1-1; it must not replace the selected 6.4.0 toolchain matched to Xcode 27.0.",
           "hostCompatibility": {
-            "strategy": "Apply the pinned swift-bin 6.4.0-2 ncurses dependency rewrites inside a user-local stage and place the legacy libxml2 ABI in the toolchain's private runtime paths.",
-            "patchelf": {
-              "version": "0.19.2-1",
-              "source": "https://archive.archlinux.org/packages/p/patchelf/patchelf-0.19.2-1-x86_64.pkg.tar.zst",
-              "sha256": "3d4904a9d634de14b7dbacdfc521bf07bb5f20033707f5ff965416b9c17edc3b",
-              "signatureSha256": "8ecf8549588134603d8aac75ddf1ab4d9d961b9abff2db3fd5b81d595d9fbc9b",
-              "signingKey": "54C1FD273361EA514A237793F296BDE50368C6CE",
-              "license": "GPL-3.0-or-later"
+            "strategy": "Build ncurses and libxml2 from hash-verified upstream source with bundled Swift Clang 21, stage them only in private Swift runtime directories, and do not patch ELF files or use distro packages.",
+            "ncurses": {
+              "version": "6.6",
+              "source": "https://ftp.gnu.org/gnu/ncurses/ncurses-6.6.tar.gz",
+              "sha256": "355b4cbbed880b0381a04c46617b7656e362585d52e9cf84a67e2009b749ff11",
+              "license": "X11-like"
             },
-            "libxml2Legacy": {
-              "version": "2.13.9-2",
-              "source": "https://archive.archlinux.org/packages/l/libxml2-legacy/libxml2-legacy-2.13.9-2-x86_64.pkg.tar.zst",
-              "sha256": "aac28a52e81422935e3bfa44044030640c5d525ad8f65a9672a3ab7139974652",
-              "signatureSha256": "17ee7b04602a2d5b24f76332f8e146a55a54317a25f11bc17e88a36bdc6d64db",
-              "signingKey": "ADC8A1FCC15E01D45310419E94657AB20F2A092B",
+            "libxml2": {
+              "version": "2.13.9",
+              "source": "https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.9.tar.xz",
+              "sha256": "a2c9ae7b770da34860050c309f903221c67830c86e4a7e760692b803df95143a",
               "license": "MIT"
             },
-            "systemNcurses": "6.6-2",
             "localEvidence": "Swift and swiftc report 6.4, bundled Clang reports 21.0.0, and a release SwiftPM executable builds and runs with no LD_LIBRARY_PATH."
           },
           "stagedOutputs": {
-            "swiftSha256": "e1a3eb27b94273a1ec6397a51bb72f83c2e522b8bf81fefb748e4bf5ce3f2b74",
+            "swiftSha256": "eb654eb03c86e363f3ff7a251f34aa0740efd49fcf260cd4c43041d20a60b52b",
             "swiftFrontendSha256": "eb09157a34c8c030abff718d06b0a4b721b70dc4da910bbaaa4c2c0b5299d446",
             "clangSha256": "3753e74f2ae853e3455fcf81877a0e1fd8906cd557e74aecf2b63108d3c097c3",
-            "privateLibxml2Sha256": "7e05bdfecc5871ebb5628e501e94e7ea51af592dc8f285decb679177c45dda7f"
+            "privateNcursesSha256": "c4cd27191189c942084a8973467baa5b83ab8067d951c4b7281ae56f61b82fe0",
+            "privatePanelSha256": "7d35183a1ee354e5c0307208129882ba8b18fce3f8348ee50c9fe62067e83387",
+            "privateFormSha256": "82fb1a593b08d9801b850a6341cd6dc3c6205a0919f6099012ff4970d5a15c09",
+            "privateLibxml2Sha256": "3a23f2967325395145b43da7b1901eeadb15060f36179ae441ecd419756961b0"
           }
         },
         "xtool": {
@@ -330,14 +448,30 @@
             "artifactSha256": "2fc1aeb058f6067d23e2f2217a2ea0ec843057e1d82c13db37e30b8219d8d469"
           },
           "stagedOutputs": {
-            "xtoolSha256": "b67215c7b4145faf8851939d31d7a98085959d7c0ea9cec7c1b461695f006e18",
+            "xtoolSha256": "91be27f15a5318b13487a89294e6f69cf7846cd9494d7c323d85ab44c6fab452",
             "libXADISha256": "eb68bd3dad62f68eac166aad7dc4e8c931013f42a529a8f5d4c520e671375350",
-            "normalization": "The varying GNU build-ID note is removed after confirming all loadable/code/data/Swift metadata sections are byte-identical; two independent normalized builds produced the recorded hashes.",
-            "localEvidence": "The staged executable reports the exact revision, resolves its private Swift runtime through $ORIGIN, and executes --help with LD_LIBRARY_PATH unset. Reuse verifies recorded per-stage output hashes."
+            "normalization": "The varying GNU build-ID note is removed and the non-runtime .swift_modhash section is zeroed after confirming it is the only remaining cross-prefix difference. Two fresh offline builds from different deterministic Swift prefixes produced the recorded byte-identical hash.",
+            "localEvidence": "The staged executable reports the exact revision, resolves its private Swift runtime through $ORIGIN, executes --help with LD_LIBRARY_PATH unset, and passes offline reuse with output hashes rechecked."
           },
           "license": "MIT",
           "licenseSha256": "04cf87035e25606762ba596ec29ecac450a281f3d210a8042c91f49645c2e695",
-          "transitiveLicenseAudit": "pending"
+          "transitiveLicenseAudit": {
+            "status": "complete for private build-only use; binary redistribution blocked pending release-specific LGPL and notice compliance",
+            "reviewedPins": 55,
+            "licenseFamilies": {
+              "Apache-2.0": 32,
+              "MIT": 19,
+              "BSD-2-Clause": 2,
+              "LGPL-3.0-only": 1,
+              "LGPL-2.1-only": 1
+            },
+            "noticeFiles": 18,
+            "durableInventorySha256": "5d90a5c5dc3983b5ccb5d24ee0256b4406304db5a3a37246efecbc6ef66bc59f",
+            "durableInventoryPath": "share/licenses/xtool/SHA256SUMS",
+            "copyleftDependencies": ["unxip: LGPL-3.0-only", "xadi: LGPL-2.1-only"],
+            "classification": "build-only",
+            "redistribution": "blocked until a release carries all notices and satisfies LGPL source/relinking requirements"
+          }
         },
         "openAppleMacros": {
           "repository": "https://github.com/joshuaswarren/OpenAppleMacros.git",
@@ -387,8 +521,44 @@
           "version": "3.1.731",
           "source": "https://github.com/blacktop/ipsw/releases/tag/v3.1.731",
           "linuxX64TarSha256": "98e5b127641be3511242a5ba9c5872ef34010e5171318b616e5aa80a607749ff",
-          "scope": "LLDB/device-symbol support; not required for the first build/install/launch gate",
-          "licenseAudit": "pending"
+          "scope": "LLDB/device-symbol support; not acquired or installed by the root bootstrap",
+          "licenseAudit": "out of the installed graph; must be completed before ipsw is added to bootstrap or release inputs"
+        },
+        "portablePython": {
+          "version": "3.14.8",
+          "build": "20261013",
+          "source": "https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.14.8%2B20261013-x86_64-unknown-linux-gnu-install_only.tar.gz",
+          "sha256": "322271a761140ffb3f522431048f701831e412c8f64770103d2b881ee2bbaed0",
+          "executableSha256": "1fd534136499c05c3031d9453d279b257e225072341c68a1d0c4b30b96dc5d17",
+          "licenseRetention": {
+            "classification": "build-only",
+            "cpythonLicenseSha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231",
+            "builderLicense": {
+              "source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20261013/LICENSE",
+              "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+            },
+            "bundledDependencyLicenses": {
+              "source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20261013/python-licenses.rst",
+              "sha256": "e43fb936c6655d7996dba480d7ebdea492d6040ec388eb8ed9d1000f72de8cab"
+            },
+            "redistribution": "blocked pending a release-specific source and notice compliance bundle"
+          },
+          "uv": {
+            "version": "0.9.10",
+            "source": "https://github.com/astral-sh/uv/releases/download/0.9.10/uv-x86_64-unknown-linux-gnu.tar.gz",
+            "sha256": "440c4215b171e64061d65d16a23753dd25c29a7f7b1b0446c9e9aed0fa372f27",
+            "executableSha256": "040491bf5feb28ce7409dfc2f9aa1532aeb569aba70f61bd4d3ddb2386d13350",
+            "license": "Apache-2.0 OR MIT",
+            "licenseApache": {
+              "source": "https://raw.githubusercontent.com/astral-sh/uv/0.9.10/LICENSE-APACHE",
+              "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+            },
+            "licenseMit": {
+              "source": "https://raw.githubusercontent.com/astral-sh/uv/0.9.10/LICENSE-MIT",
+              "sha256": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c"
+            }
+          },
+          "localEvidence": "Transactional install and offline reuse passed on glibc Linux x86-64; archive, executable, and durable license hashes are rechecked."
         },
         "pymobiledevice3": {
           "version": "11.26.0",
@@ -399,7 +569,20 @@
           "requirementsLock": "eng/toolchain/pymobiledevice3-requirements.lock",
           "requirementsLockSha256": "b76b9db5d691b7ae6d6e377884e7ff070f2545b5749d724fb24dc7d60f3d90d5",
           "resolvedPythonPackages": 101,
-          "localEvidence": "A hash-enforced isolated Python 3.14.8 installation imports pymobiledevice3 and cryptography, reports pymobiledevice3 11.26.0, discovers one USB device, and validates one existing lockdown pairing through the redacted probe.",
+          "localEvidence": "A hash-enforced isolated portable Python 3.14.8 installation imports pymobiledevice3 and cryptography, reports pymobiledevice3 11.26.0, passes offline reuse, discovers one USB device, and validates one existing lockdown pairing through the redacted probe.",
+          "transitiveLicenseAudit": {
+            "status": "all 101 exact installed distributions reviewed from wheel metadata and embedded notices; private build-only use accepted",
+            "reviewedDistributions": 101,
+            "copyleftExamples": [
+              "pymobiledevice3 and developer-disk-image: GPL-3.0-or-later",
+              "pmd-net-addr, pmd-net-proto, and pmd-pytcp: GPL-3.0-or-later",
+              "pylzss: LGPLv3",
+              "firmware/parser helpers include GPL-3.0-or-later components"
+            ],
+            "metadataConflicts": ["pytun-pmd3", "remotezip2"],
+            "classification": "build-only",
+            "redistribution": "blocked until a release-specific notice/source bundle resolves copyleft obligations and metadata conflicts"
+          },
           "installerDrift": "The upstream installer uses an unbounded pip install and currently resolves 11.40.0; that path is rejected."
         }
       },
@@ -416,7 +599,7 @@
           "libtatsu 1.0.5",
           "usbmuxd 1.1.1-4 active through udev activation",
           "zip 3.0-14",
-          "Python 3.14.8",
+          "project-owned portable Python 3.14.8 and uv 0.9.10 stage",
           "project-owned Swift 6.4.0 stage with bundled Clang 21.0.0",
           "project-owned xtool f0a1f90 stage",
           "project-owned pymobiledevice3 11.26.0 stage",
@@ -447,13 +630,12 @@
         "force-quit and cold-relaunched the incremental bundle under a redacted read-only syslog observation with no fatal report or crash activity"
       ],
       "requiredEvidence": [
-        "complete transitive license review for xtool, ipsw, and Python dependencies",
         "supply an operator-approved personalized Developer Disk Image only for automated CoreDevice launch"
       ]
     }
   },
   "referenceMac": {
-    "status": "clean HelloIos reference build completed through Mono AOT and native link; device execution unverified",
+    "status": "clean HelloIos reference-Mac build completed through Mono AOT and native link; no device execution was attempted for this separate reference",
     "macos": "26.7.1 (25G241)",
     "architecture": "arm64",
     "helloIosReportSha256": "4160ba166069a376e2cd3895a588c3c8b05074618d7e8212baccac018ce0448b",
@@ -466,14 +648,12 @@
     "limitations": [
       "The reference is Mac-hosted and does not establish Linux host compatibility.",
       "The private reports, inventories, and binlogs were checksum-verified and removed from the repository worktree after their hashes were recorded here.",
-      "Device installation, launch, and probe execution are unverified."
+      "Device installation, launch, and probe execution were not attempted as part of this reference-Mac evidence; the verified Linux physical-device path is recorded separately above."
     ]
   },
   "acceptance": {
     "requiredBeforeAcceptedLock": [
-      "complete package hashes, signatures, and transitive license review",
-      "effective Linux workload graph",
-      "transactional workload lifecycle and rollback"
+      "end-to-end root bootstrap run with the authentic Xcode_27.xip archive"
     ]
   }
 }

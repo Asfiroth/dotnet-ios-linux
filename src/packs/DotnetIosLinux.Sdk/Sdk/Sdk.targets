@@ -1,0 +1,11 @@
+<Project>
+  <Import Project="$(MSBuildThisFileDirectory)DotnetIosLinux.Integration.targets"
+          Condition="Exists('$(MSBuildThisFileDirectory)DotnetIosLinux.Integration.targets')" />
+
+  <Target Name="_DotnetIosLinuxValidateEnvironment"
+          BeforeTargets="PrepareForBuild"
+          Condition="$([MSBuild]::IsOSPlatform('linux')) And '$(TargetPlatformIdentifier)' == 'iOS'">
+    <Error Condition="'$(XcodeLocation)' == ''"
+           Text="dotnet-ios-linux requires DEVELOPER_DIR or XcodeLocation to select its synthetic Xcode." />
+  </Target>
+</Project>

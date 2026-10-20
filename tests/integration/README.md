@@ -41,3 +41,11 @@ macios `_DetectSdkLocations` target and proves that the compatibility SDK maps
 isolated package directory, runs the actual macios `_FindAotCompiler` target,
 and requires its `MonoAotCrossCompiler` item to resolve to the staged
 `ios-arm64` Linux compiler.
+
+`verify-workload-lifecycle.sh` creates an isolated SDK root from the locked SDK
+archive, generates the local derivative feed, and exercises workload update,
+install, list, restore, repair, uninstall, clean, and reinstall. With a
+`--developer-dir`, it also builds unchanged copies of `HelloIos` and `AotProbe`
+through LLVM AOT. Each installed official package archive is hash-checked and
+must pass NuGet author/repository signature verification; local derivative
+packages must remain unsigned. It never operates on `~/.dotnet`.

@@ -11,11 +11,15 @@ import plistlib
 import re
 import shutil
 import stat
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from xip_archive import CpioEntry, XcodeMetadata, inspect_metadata, open_cpio
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from atomic import exchange_directories, publish_directory_noreplace
 
 
 MARKER = ".dotnet-ios-linux-sdk.json"
@@ -303,6 +307,8 @@ def extract_sdk(
 
 def require_owned_sdk(path: Path) -> None:
     marker = path / MARKER
+    if path.is_symlink() or not path.is_dir() or marker.is_symlink():
+        fail(f"refusing to replace unowned SDK directory: {path}")
     try:
         value = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
@@ -313,25 +319,28 @@ def require_owned_sdk(path: Path) -> None:
 
 def install_stage(stage: Path, output: Path, replace: bool) -> None:
     if not os.path.lexists(output):
-        os.replace(stage, output)
+        try:
+            publish_directory_noreplace(stage, output)
+        except FileExistsError:
+            fail(f"output appeared during publication; refusing to replace it: {output}")
         return
     if not replace:
         fail(f"output already exists: {output}")
     require_owned_sdk(output)
-    backup = stage.with_name(stage.name + ".previous")
-    os.replace(output, backup)
-    try:
-        os.replace(stage, output)
-    except BaseException:
-        os.replace(backup, output)
-        raise
-    shutil.rmtree(backup)
+    output_stat = output.stat(follow_symlinks=False)
+    expected_identity = (output_stat.st_dev, output_stat.st_ino)
+    exchange_directories(stage, output)
+    replaced_stat = stage.stat(follow_symlinks=False)
+    if (replaced_stat.st_dev, replaced_stat.st_ino) != expected_identity:
+        exchange_directories(stage, output)
+        fail("SDK output changed during owned replacement")
+    shutil.rmtree(stage)
 
 
 def main() -> int:
     options = parse_arguments()
     archive = options.archive.expanduser().resolve()
-    output = options.output.expanduser().resolve()
+    output = options.output.expanduser().absolute()
     expected_hash = options.archive_sha256.lower()
     if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
         print("Xcode SDK import failed: --archive-sha256 must contain 64 lowercase hex characters")

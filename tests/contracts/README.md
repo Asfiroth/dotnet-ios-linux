@@ -12,6 +12,11 @@ argument boundaries, Linux driver adaptation, and fail-closed behavior; they do
 not claim Apple SDK or linker integration. The suite also tests development
 profile team/bundle constraints and Mach-O code-signature load-command
 detection without using real credentials, profiles, or device identifiers.
+Installer contracts use synthetic .NET archives and workload trees to exercise
+merge conflicts, interruption recovery, rollback preflight, ownership-aware
+uninstall, coexistence with later workloads, and mutation-free dry runs without
+downloading or executing an SDK. They also exercise randomized verified
+downloads, cache ownership, and Linux atomic no-clobber directory publication.
 
 Run the complete SDK-free repository validation, including these tests, shell
 syntax, lockfile paths, documentation links, and private-artifact guards, with

@@ -20,6 +20,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from atomic import publish_directory_noreplace
+
 
 EXPECTED_RCODESIGN_VERSION = "apple-codesign 0.29.0"
 EXPECTED_RCODESIGN_SHA256 = "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2"
@@ -497,7 +500,7 @@ def execute(arguments: argparse.Namespace) -> None:
     if plug_ins.is_dir() and any(plug_ins.glob("*.appex")):
         raise SigningError("app extensions require separate profiles and are not supported by this gate")
 
-    output = arguments.output.expanduser().resolve()
+    output = arguments.output.expanduser().absolute()
     if output.exists() or output.is_symlink():
         raise SigningError("signed output already exists; refusing to replace it")
     if output.suffix != ".app":
@@ -571,7 +574,12 @@ def execute(arguments: argparse.Namespace) -> None:
             ],
             failure="rcodesign executable verification failed",
         )
-        os.replace(staged_app, output)
+        try:
+            publish_directory_noreplace(staged_app, output)
+        except FileExistsError as error:
+            raise SigningError(
+                f"signed output appeared during publication; refusing to replace it: {output}"
+            ) from error
 
     print(f"signed_app={output}")
     print("bundle_identifier_match=true")

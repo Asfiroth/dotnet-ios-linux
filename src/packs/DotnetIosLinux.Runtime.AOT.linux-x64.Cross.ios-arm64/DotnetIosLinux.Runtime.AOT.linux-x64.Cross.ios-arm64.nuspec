@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64</id>
+    <version>0.1.0-preview.1</version>
+    <authors>Asfiroth</authors>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="file">LICENSE</license>
+    <projectUrl>https://github.com/Asfiroth/dotnet-ios-linux</projectUrl>
+    <description>LLVM-enabled Linux x64 Mono AOT cross compiler for the pinned iOS arm64 runtime.</description>
+    <copyright>Copyright (c) 2026 Asfiroth</copyright>
+    <packageTypes>
+      <packageType name="DotnetPlatform" />
+    </packageTypes>
+  </metadata>
+</package>

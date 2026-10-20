@@ -6,6 +6,7 @@ readonly llvm_config_version="19.1.0-mono"
 readonly llvm_package_version="19.1.0-alpha.1.25461.1"
 readonly llvm_source_commit="2cfe42ea4a7fe364dcb197beca469af8edec0ad6"
 readonly target_triple="aarch64-apple-darwin10"
+readonly expected_compiler_sha256="c85a0aad43764e9d17077f23faf6e638e79b47b315263116b2350038d977866d"
 
 usage() {
     cat <<'EOF'
@@ -62,11 +63,8 @@ actual_revision="$(git -C "$source_root" rev-parse HEAD)"
     exit 1
 }
 
-patch_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/patches/0001-linux-host-apple-mobile-aot-cross.patch"
-git -C "$source_root" apply --reverse --check "$patch_file" >/dev/null 2>&1 || {
-    printf 'required runtime patch is not applied; run eng/runtime/apply-patches.sh first\n' >&2
-    exit 1
-}
+runtime_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+"$runtime_script_dir/verify-source.sh" --source "$source_root" --state patched >/dev/null
 
 version_directory="$source_root/artifacts/obj"
 mkdir -p "$version_directory"
@@ -168,6 +166,12 @@ if [[ "$mode" == llvm ]]; then
 fi
 read -r magic < <(od -An -tx1 -N4 "$compiler" | tr -d ' ')
 [[ "$magic" == "7f454c46" ]] || { printf 'compiler is not an ELF executable\n' >&2; exit 1; }
+compiler_sha256="$(sha256sum -b "$compiler" | cut -d' ' -f1)"
+[[ "$compiler_sha256" == "$expected_compiler_sha256" ]] || {
+    printf 'compiler output hash mismatch: expected %s, got %s\n' \
+        "$expected_compiler_sha256" "$compiler_sha256" >&2
+    exit 1
+}
 
 version_output="$($compiler --version)"
 if [[ "$mode" == llvm ]]; then
@@ -190,6 +194,7 @@ Path(path).write_text(json.dumps({
     "llvmMode": mode,
     "matchedLlvmPackageVersion": llvm if mode == "llvm" else None,
     "matchedLlvmSourceCommit": llvm_commit if mode == "llvm" else None,
+    "compilerSha256": "c85a0aad43764e9d17077f23faf6e638e79b47b315263116b2350038d977866d",
 }, indent=2) + "\n", encoding="utf-8")
 PY
 

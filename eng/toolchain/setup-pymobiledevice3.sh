@@ -11,6 +11,7 @@ readonly marker_name=".dotnet-ios-linux-pymobiledevice3"
 usage() {
     cat <<'EOF'
 Usage: setup-pymobiledevice3.sh --destination <directory> [--python <executable>]
+       [--uv <executable>] [--cache <directory>] [--offline]
 
 Creates an isolated pymobiledevice3 11.26.0 environment from the complete,
 hash-enforced lock. This lock is intentionally specific to Linux x86-64 and
@@ -20,17 +21,30 @@ EOF
 
 destination=""
 python="/usr/bin/python3"
+uv="uv"
+cache=""
+offline=false
 while (($#)); do
     case "$1" in
         --destination) destination="${2:?missing value for --destination}"; shift 2 ;;
         --python) python="${2:?missing value for --python}"; shift 2 ;;
+        --uv) uv="${2:?missing value for --uv}"; shift 2 ;;
+        --cache) cache="${2:?missing value for --cache}"; shift 2 ;;
+        --offline) offline=true; shift ;;
         --help|-h) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
     esac
 done
 [[ -n "$destination" ]] || { usage >&2; exit 2; }
-command -v uv >/dev/null || { printf 'uv is required\n' >&2; exit 1; }
+for tool in mktemp mv realpath sha256sum; do
+    command -v "$tool" >/dev/null || { printf '%s is required\n' "$tool" >&2; exit 1; }
+done
 [[ -x "$python" ]] || { printf 'Python is not executable: %s\n' "$python" >&2; exit 1; }
+if [[ "$uv" == */* ]]; then
+    [[ -x "$uv" ]] || { printf 'uv is not executable: %s\n' "$uv" >&2; exit 1; }
+else
+    uv="$(command -v "$uv")" || { printf 'uv is required\n' >&2; exit 1; }
+fi
 
 printf '%s  %s\n' "$requirements_sha256" "$requirements" |
     sha256sum --check --status || {
@@ -66,12 +80,15 @@ PY
     }
 }
 
+python_sha256="$(sha256sum -b "$(realpath "$python")" | cut -d' ' -f1)"
 marker="requirements_sha256=$requirements_sha256
 pymobiledevice3=$expected_version
-host=$host"
+host=$host
+python_sha256=$python_sha256"
 
-if [[ -e "$destination" ]]; then
-    [[ -d "$destination" && -f "$destination/$marker_name" ]] || {
+if [[ -e "$destination" || -L "$destination" ]]; then
+    [[ -d "$destination" && ! -L "$destination" && -f "$destination/$marker_name" &&
+       ! -L "$destination/$marker_name" ]] || {
         printf 'existing destination is not owned by this setup: %s\n' "$destination" >&2
         exit 1
     }
@@ -94,8 +111,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-uv venv --python "$python" "$stage"
-uv pip sync --python "$stage/bin/python" --require-hashes "$requirements"
+uv_environment=()
+if [[ -n "$cache" ]]; then
+    [[ ! -L "$cache" ]] || { printf 'cache directory must not be a symlink: %s\n' "$cache" >&2; exit 1; }
+    mkdir -p "$cache"
+    uv_environment+=("UV_CACHE_DIR=$cache")
+fi
+uv_arguments=()
+[[ "$offline" == false ]] || uv_arguments+=(--offline)
+env "${uv_environment[@]}" "$uv" venv --python "$python" "$stage"
+env "${uv_environment[@]}" "$uv" pip sync --python "$stage/bin/python" \
+    --require-hashes "${uv_arguments[@]}" "$requirements"
 verify_environment "$stage"
 "$stage/bin/python" - "$stage" "$destination" <<'PY'
 from pathlib import Path
@@ -112,7 +138,11 @@ for path in [root / "pyvenv.cfg", *(root / "bin").iterdir()]:
         path.write_bytes(data.replace(old, new))
 PY
 printf '%s\n' "$marker" > "$stage/$marker_name"
-mv "$stage" "$destination"
+mv --no-clobber --no-target-directory "$stage" "$destination"
+[[ ! -e "$stage" ]] || {
+    printf 'pymobiledevice3 destination appeared during publication; refusing to replace it: %s\n' "$destination" >&2
+    exit 1
+}
 stage=""
 verify_environment "$destination"
 

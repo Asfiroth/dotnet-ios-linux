@@ -8,10 +8,14 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from atomic import exchange_directories, publish_directory_noreplace
 
 
 VERSION = "19.1.0-alpha.1.25461.1"
@@ -88,7 +92,25 @@ def copy_payload(source: Path, destination: Path) -> None:
             shutil.copy2(child, target)
 
 
-def verify_root(root: Path) -> dict[str, str]:
+def inventory(root: Path) -> list[dict]:
+    entries: list[dict] = []
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if relative == MARKER:
+            continue
+        mode = stat.S_IMODE(path.lstat().st_mode)
+        if path.is_symlink():
+            entries.append({"path": relative, "kind": "symlink", "target": os.readlink(path), "mode": mode})
+        elif path.is_dir():
+            entries.append({"path": relative, "kind": "directory", "mode": mode})
+        elif path.is_file():
+            entries.append({"path": relative, "kind": "file", "sha256": sha256(path), "mode": mode})
+        else:
+            fail(f"unsupported LLVM payload entry: {path}")
+    return entries
+
+
+def verify_root(root: Path, *, make_executable: bool) -> dict[str, str]:
     required = [
         root / "bin" / "llvm-config",
         root / "bin" / "llc",
@@ -101,8 +123,9 @@ def verify_root(root: Path) -> dict[str, str]:
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         fail("assembled root is incomplete; missing: " + ", ".join(missing))
-    for path in required[:3]:
-        path.chmod(path.stat().st_mode | 0o111)
+    if make_executable:
+        for path in required[:3]:
+            path.chmod(path.stat().st_mode | 0o111)
 
     versions: dict[str, str] = {}
     for tool in ("llvm-config", "llc", "opt"):
@@ -118,12 +141,34 @@ def verify_root(root: Path) -> dict[str, str]:
     return versions
 
 
+def verify_existing(root: Path) -> None:
+    marker = root / MARKER
+    try:
+        value = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"cannot read LLVM ownership marker {marker}: {error}")
+    if value.get("version") != VERSION or value.get("feed") != FEED or value.get("sourceCommit") != SOURCE_COMMIT:
+        fail(f"existing LLVM root has different provenance: {root}")
+    observed = {item.get("id"): item.get("sha256") for item in value.get("packages", [])}
+    if observed != PACKAGES:
+        fail(f"existing LLVM root has different package hashes: {root}")
+    expected_inventory = value.get("files")
+    if not isinstance(expected_inventory, list) or inventory(root) != expected_inventory:
+        fail(f"existing LLVM root failed its payload inventory: {root}")
+    verify_root(root, make_executable=False)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="assembled LLVM root")
     parser.add_argument("--packages", type=Path, required=True, help="isolated NuGet package cache")
     parser.add_argument("--dotnet", default=shutil.which("dotnet"), help="dotnet executable")
     parser.add_argument("--replace", action="store_true", help="replace only a root created by this script")
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="assemble only from already restored, hash-verified packages",
+    )
     args = parser.parse_args()
 
     if not args.dotnet:
@@ -132,14 +177,18 @@ def main() -> None:
     if not dotnet.is_file() or not os.access(dotnet, os.X_OK):
         fail(f"dotnet is not executable: {dotnet}")
 
-    output = args.output.expanduser().resolve()
+    output = args.output.expanduser().absolute()
     cache = args.packages.expanduser().resolve()
-    if output.exists():
-        if not args.replace:
-            fail(f"output already exists: {output}")
-        if not (output / MARKER).is_file():
+    output_exists = output.exists() or output.is_symlink()
+    if output_exists:
+        if output.is_symlink() or not output.is_dir() or not (output / MARKER).is_file() or (output / MARKER).is_symlink():
             fail(f"refusing to replace an unowned directory: {output}")
-        shutil.rmtree(output)
+        if not args.replace:
+            verify_existing(output)
+            print(f"llvm_root={output}")
+            print(f"llvm_version={VERSION}")
+            print("reused=true")
+            return
     output.parent.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)
 
@@ -161,19 +210,20 @@ def main() -> None:
         )
         environment = os.environ.copy()
         environment["NUGET_PACKAGES"] = str(cache)
-        run(
-            [
-                str(dotnet),
-                "restore",
-                str(project),
-                "--packages",
-                str(cache),
-                "--source",
-                FEED,
-                "--no-cache",
-            ],
-            environment,
-        )
+        if not args.offline:
+            run(
+                [
+                    str(dotnet),
+                    "restore",
+                    str(project),
+                    "--packages",
+                    str(cache),
+                    "--source",
+                    FEED,
+                    "--no-cache",
+                ],
+                environment,
+            )
 
         verified: dict[str, tuple[Path, Path]] = {}
         for package_id, expected_hash in PACKAGES.items():
@@ -185,7 +235,7 @@ def main() -> None:
         # and the matching SONAME runtime libraries needed by every executable.
         for package_id in PACKAGES:
             copy_payload(verified[package_id][1], stage)
-        versions = verify_root(stage)
+        versions = verify_root(stage, make_executable=True)
 
         provenance = {
             "schemaVersion": 1,
@@ -201,12 +251,32 @@ def main() -> None:
                 for package_id in PACKAGES
             ],
             "toolVersions": versions,
+            "files": inventory(stage),
         }
         (stage / MARKER).write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
-        os.replace(stage, output)
+        if output_exists:
+            # Replacement was explicitly requested and ownership was checked.
+            # Exchange is atomic, so the path never disappears and no unrelated
+            # path can be overwritten in a publication gap.
+            output_stat = output.stat(follow_symlinks=False)
+            expected_identity = (output_stat.st_dev, output_stat.st_ino)
+            exchange_directories(stage, output)
+            replaced_stat = stage.stat(follow_symlinks=False)
+            replaced_identity = (replaced_stat.st_dev, replaced_stat.st_ino)
+            if replaced_identity != expected_identity:
+                exchange_directories(stage, output)
+                fail("LLVM output changed during owned replacement")
+            shutil.rmtree(stage)
+        else:
+            try:
+                publish_directory_noreplace(stage, output)
+            except FileExistsError:
+                fail(f"LLVM output appeared during publication; refusing to replace it: {output}")
 
+    verify_existing(output)
     print(f"llvm_root={output}")
     print(f"llvm_version={VERSION}")
+    print("reused=false")
 
 
 if __name__ == "__main__":

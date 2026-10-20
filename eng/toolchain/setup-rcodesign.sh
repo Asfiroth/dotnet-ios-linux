@@ -2,6 +2,9 @@
 set -euo pipefail
 umask 077
 
+readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+. "$script_dir/../install/download-verified.sh"
+
 readonly version="0.29.0"
 readonly release_commit="2312b1e5bd77322c019613e0ca624e222c6c6e08"
 readonly archive_name="apple-codesign-$version-x86_64-unknown-linux-musl.tar.gz"
@@ -14,7 +17,7 @@ readonly marker_name=".dotnet-ios-linux-rcodesign"
 
 usage() {
     cat <<'EOF'
-Usage: setup-rcodesign.sh --destination <directory> --cache <directory>
+Usage: setup-rcodesign.sh --destination <directory> --cache <directory> [--offline]
 
 Downloads, verifies, and transactionally stages the locked rcodesign 0.29.0
 Linux x86-64 release. The destination remains project-owned; this script does
@@ -25,17 +28,19 @@ EOF
 
 destination=""
 cache=""
+offline=false
 while (($#)); do
     case "$1" in
         --destination) destination="${2:?missing value for --destination}"; shift 2 ;;
         --cache) cache="${2:?missing value for --cache}"; shift 2 ;;
+        --offline) offline=true; shift ;;
         --help|-h) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
     esac
 done
 [[ -n "$destination" && -n "$cache" ]] || { usage >&2; exit 2; }
 
-for tool in curl file readelf realpath sha256sum tar; do
+for tool in curl file install ln mktemp mv readelf realpath sha256sum tar; do
     command -v "$tool" >/dev/null || { printf '%s is required\n' "$tool" >&2; exit 1; }
 done
 [[ "$(uname -s) $(uname -m)" == "Linux x86_64" ]] || {
@@ -95,8 +100,9 @@ executable_sha256=$executable_sha256
 copying_sha256=$copying_sha256
 host=Linux x86_64"
 
-if [[ -e "$destination" ]]; then
-    [[ -d "$destination" && -f "$destination/$marker_name" ]] || {
+if [[ -e "$destination" || -L "$destination" ]]; then
+    [[ -d "$destination" && ! -L "$destination" && -f "$destination/$marker_name" &&
+       ! -L "$destination/$marker_name" ]] || {
         printf 'existing destination is not owned by this setup: %s\n' "$destination" >&2
         exit 1
     }
@@ -110,25 +116,10 @@ if [[ -e "$destination" ]]; then
     exit 0
 fi
 
+[[ ! -L "$cache" ]] || { printf 'cache directory must not be a symlink: %s\n' "$cache" >&2; exit 1; }
 mkdir -p "$cache"
 archive="$cache/$archive_name"
-if [[ -e "$archive" ]]; then
-    [[ -f "$archive" ]] && verify_hash "$archive_sha256" "$archive" || {
-        printf 'cached rcodesign archive has the wrong hash; refusing to replace it: %s\n' "$archive" >&2
-        exit 1
-    }
-else
-    part="$archive.part.$$"
-    cleanup_part() { rm -f -- "$part"; }
-    trap cleanup_part EXIT
-    curl -fL "$archive_url" -o "$part"
-    verify_hash "$archive_sha256" "$part" || {
-        printf 'rcodesign download hash mismatch: %s\n' "$archive_url" >&2
-        exit 1
-    }
-    mv "$part" "$archive"
-    trap - EXIT
-fi
+download_verified "$archive_url" sha256sum "$archive_sha256" "$archive" "$offline"
 verify_archive_members "$archive"
 
 parent="$(dirname "$destination")"
@@ -146,7 +137,11 @@ install -m755 "$extracted/$archive_root/rcodesign" "$stage/rcodesign"
 install -m644 "$extracted/$archive_root/COPYING" "$stage/COPYING"
 printf '%s\n' "$marker" > "$stage/$marker_name"
 verify_stage "$stage"
-mv "$stage" "$destination"
+mv --no-clobber --no-target-directory "$stage" "$destination"
+[[ ! -e "$stage" ]] || {
+    printf 'rcodesign destination appeared during publication; refusing to replace it: %s\n' "$destination" >&2
+    exit 1
+}
 stage=""
 rm -rf -- "$extracted"
 extracted=""

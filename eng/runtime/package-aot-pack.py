@@ -14,12 +14,22 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from atomic import publish_directory_noreplace
+
 
 EXPECTED_LLVM_PACKAGES = {
     "runtime.linux-x64.Microsoft.NETCore.Runtime.Mono.LLVM.Sdk":
         "0ab321b6a5b4a7cb159b12c5c1e14daa034a50bfae3afecd0b8737649b4811cc",
     "runtime.linux-x64.Microsoft.NETCore.Runtime.Mono.LLVM.Tools":
         "1f2783be29b44c9d53b1f11048de8f123089fafc475a30f6b6494204b842d043",
+}
+EXPECTED_AOT_FILES = {
+    "mono-aot-cross": "c85a0aad43764e9d17077f23faf6e638e79b47b315263116b2350038d977866d",
+    "libc++.so.1": "9233ff02fd30aba191b9a936eeb351d78682616fce2db29c08bbd1c3a581ca9c",
+    "libc++abi.so.1": "80bef63649f325c706768ecf9f29598429c712721b58c990117e86c826dbe534",
+    "llc": "8b53230508c94cda4ee541be27e7f9957becd32d5e2522f3be1bbe4c61079662",
+    "opt": "99464211ff7ba2175408c935d17ca375a99c564e88b476581e9b3d59af81d011",
 }
 
 
@@ -72,6 +82,8 @@ def verify_compiler_provenance(compiler: Path, expected_commit: str, expected_mo
         fail("compiler build provenance has the wrong target triple")
     if value.get("llvmMode") != expected_mode:
         fail("compiler build provenance does not match the requested LLVM mode")
+    if value.get("compilerSha256") not in {None, EXPECTED_AOT_FILES["mono-aot-cross"]}:
+        fail("compiler build provenance has the wrong compiler hash")
     if expected_mode == "llvm":
         if value.get("matchedLlvmPackageVersion") != "19.1.0-alpha.1.25461.1":
             fail("compiler build provenance has the wrong LLVM package version")
@@ -94,14 +106,13 @@ def main() -> None:
     if args.runtime_commit != expected_commit:
         fail(f"runtime commit must be {expected_commit}")
     compiler = args.compiler.expanduser().resolve()
-    output = args.output.expanduser().resolve()
+    output = args.output.expanduser().absolute()
     if not compiler.is_file() or not os.access(compiler, os.X_OK):
         fail(f"compiler is not executable: {compiler}")
-    if output.exists():
-        if not output.is_dir():
-            fail(f"output is not a directory: {output}")
-        if any(output.iterdir()):
-            fail(f"output must not be a non-empty directory: {output}")
+    if sha256(compiler) != EXPECTED_AOT_FILES["mono-aot-cross"]:
+        fail("compiler hash does not match the proven LLVM-enabled output")
+    if output.exists() or output.is_symlink():
+        fail(f"output must not already exist: {output}")
 
     version = execute([str(compiler), "--version"])
     if "Architecture:  arm64" not in version:
@@ -147,6 +158,9 @@ def main() -> None:
                     fail(f"{name} is not matched LLVM 19.1.0")
                 hashes[name] = sha256(destination)
 
+            if hashes != EXPECTED_AOT_FILES:
+                fail("AOT payload hashes do not match the locked compiler and LLVM outputs")
+
             # mono-aot-cross uses an $ORIGIN runtime path; prove the staged pack
             # is self-contained before publishing it.
             staged_version = execute([str(installed_compiler), "--version"])
@@ -178,9 +192,10 @@ def main() -> None:
             "compilerVersionOutput": version.splitlines(),
         }
         (stage / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
-        if output.exists():
-            output.rmdir()
-        os.replace(stage, output)
+        try:
+            publish_directory_noreplace(stage, output)
+        except FileExistsError:
+            fail(f"output appeared during publication; refusing to replace it: {output}")
     print(f"aot_pack={output}")
     print(f"llvm_mode={llvm_mode}")
 

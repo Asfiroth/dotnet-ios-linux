@@ -1,5 +1,11 @@
 # Synthetic Xcode slice
 
+The supported orchestration entry point is the repository-root `install.sh`.
+It validates the complete lock, imports the operator-supplied Xcode archive,
+stages these tools under the durable data root, and leaves downloads/builds in
+the disposable cache. The commands below document and test individual
+components; they are not a second installation layout.
+
 `import-xcode-sdk.py` transactionally imports an authentic device SDK from a
 user-supplied Xcode XIP. `build-synthetic-xcode.py` then validates that SDK and creates only
 the Xcode filesystem and query contracts consumed by the pinned macios SDK. It
@@ -79,11 +85,13 @@ eng/toolchain/setup-swift.sh \
   --cache /tmp/opencode/dotnet-ios-backend/downloads
 ```
 
-The setup applies the compatibility changes from the pinned historical
-`swift-bin` 6.4.0-2 recipe in the private stage. It uses hash- and
-signature-verified `patchelf` and `libxml2-legacy` Arch packages, then verifies
-a complete `swift build` with `LD_LIBRARY_PATH` removed. The system Swift and
-package database are not changed.
+The setup extracts the hash-verified Swift archive, then builds ncurses `6.6`
+and libxml2 `2.13.9` from hash-verified upstream sources with the archive's
+bundled Clang 21. The deterministic compatibility libraries are installed only
+in Swift's private runtime directories. No Arch package, distro package
+manager, `patchelf`, `/usr` mutation, or ambient `LD_LIBRARY_PATH` is used. Two
+independent source builds produced byte-identical compatibility libraries and
+both passed a complete release `swift build` smoke test.
 
 Build the selected xtool fork against that stage:
 
@@ -98,11 +106,31 @@ The build enforces `eng/toolchain/xtool-Package.resolved.lock`, including the
 `OpenCombine` transitive pin missing from the upstream resolution, and verifies
 XADI's source revision and binary-artifact checksum. It leaves the source cache
 clean and bundles only the required private Swift runtime libraries with an
-`$ORIGIN` runpath. The non-runtime GNU build-ID note is removed after linking;
-two independent normalized builds produced xtool SHA-256
-`b67215c7b4145faf8851939d31d7a98085959d7c0ea9cec7c1b461695f006e18`
+`$ORIGIN` runpath. The non-runtime GNU build-ID note is removed and the varying
+`.swift_modhash` metadata section is zeroed after linking. Fresh offline builds
+from two different Swift prefixes are byte-identical at xtool SHA-256
+`91be27f15a5318b13487a89294e6f69cf7846cd9494d7c323d85ab44c6fab452`
 and libXADI SHA-256
 `eb68bd3dad62f68eac166aad7dc4e8c931013f42a529a8f5d4c520e671375350`.
+Offline reuse rechecks those hashes and executes `--help` with
+`LD_LIBRARY_PATH` unset. The private stage also retains all 55 dependency
+license files and 18 notices under `share/licenses/xtool`; its deterministic
+74-entry checksum inventory is rechecked on reuse.
+
+Stage the pinned portable Python and uv before deployment tooling:
+
+```sh
+eng/toolchain/setup-python.sh \
+  --destination /tmp/opencode/python-3.14.8 \
+  --cache /tmp/opencode/dotnet-ios-backend/downloads
+```
+
+This uses CPython `3.14.8` build `20261013` and uv `0.9.10`; both archives and
+their staged executables are hash-verified. The stage retains the CPython
+license, python-build-standalone's MPL license and consolidated bundled-library
+license inventory, and uv's Apache/MIT licenses under `share/licenses`. Those
+files are independently pinned and remain available after cache deletion. It
+does not merge into a system Python.
 
 Device transport uses the receipt-proven `pymobiledevice3` 11.26.0 rather than
 the upstream installer's unbounded latest version. Build it transactionally in
@@ -110,7 +138,10 @@ a project-owned prefix with the complete Python 3.14/x86-64 lock:
 
 ```sh
 eng/toolchain/setup-pymobiledevice3.sh \
-  --destination /tmp/opencode/pymobiledevice3-11.26
+  --destination /tmp/opencode/pymobiledevice3-11.26 \
+  --python /tmp/opencode/python-3.14.8/bin/python3 \
+  --uv /tmp/opencode/python-3.14.8/bin/uv \
+  --cache /tmp/opencode/pymobiledevice3-cache
 ```
 
 This environment contains no authentication or pairing records. Keep those in
@@ -118,9 +149,10 @@ their normal private user locations and never include them in receipts. Full
 backend mode still requires a user-supplied Xcode 27 archive or extracted SDK;
 the no-Xcode framework subset is not accepted for the .NET native-link gate.
 
-On Arch-like hosts, USB transport additionally requires the system packages
-`usbmuxd` and `zip`. After installing them and reconnecting the unlocked phone,
-run identifier-free discovery first:
+USB transport requires a working host `usbmuxd` service and OS device access.
+Provision those with the host's normal administration mechanism; the project
+installer does not elevate privileges or modify system services. After
+reconnecting the unlocked phone, run identifier-free discovery first:
 
 ```sh
 /tmp/opencode/pymobiledevice3-11.26-pinned/bin/python \
@@ -162,9 +194,10 @@ eng/toolchain/setup-rcodesign.sh \
 
 The setup verifies the release archive, its exact three-member layout, the
 executable and license-inventory hashes, ELF architecture, static-PIE linkage,
-and the exact `apple-codesign 0.29.0` version. Publication is an atomic rename.
-An existing destination is reused only when its ownership/provenance marker and
-payload still match; corrupt caches and unowned destinations are not replaced.
+and the exact `apple-codesign 0.29.0` version. Publication is atomic and
+no-clobber. An existing destination is reused only when its
+ownership/provenance marker and payload still match; corrupt caches and unowned
+destinations are not replaced.
 The setup does not inspect credentials, create certificates, or sign code.
 
 The staged `COPYING` file inventories 335 transitive components and 13 SPDX

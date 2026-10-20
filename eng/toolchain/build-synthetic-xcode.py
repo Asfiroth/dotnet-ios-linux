@@ -16,6 +16,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from atomic import exchange_directories, publish_directory_noreplace
+
 
 MARKER = "dotnet-ios-linux.json"
 
@@ -156,21 +159,23 @@ def write_activation(path: Path, developer: Path, dotnet_root: Path | None) -> N
 
 def require_owned_bundle(path: Path) -> None:
     marker = path / "Contents" / MARKER
-    if not marker.is_file():
+    if path.is_symlink() or not path.is_dir() or marker.is_symlink() or not marker.is_file():
         fail(f"refusing to replace unowned directory: {path}")
 
 
 def build(args: argparse.Namespace) -> None:
     source = args.sdk.expanduser().resolve()
-    output = args.output.expanduser().resolve()
+    output = args.output.expanduser().absolute()
     shim_root = args.shims.expanduser().resolve()
     settings, version, sdk_build, sdk_build_source = validate_sdk(source, args.sdk_version)
     for label, value in (("Xcode", args.xcode_build), ("platform", args.platform_build)):
         if not re.fullmatch(r"[0-9]+[A-Z][0-9A-Za-z]+", value):
             fail(f"invalid {label} build identifier: {value!r}")
 
-    replace_output = output.exists()
+    replace_output = output.exists() or output.is_symlink()
     if replace_output:
+        if output.is_symlink():
+            fail(f"refusing to replace symlink output: {output}")
         if not args.replace:
             fail(f"output already exists (pass --replace for a project-owned bundle): {output}")
         require_owned_bundle(output)
@@ -259,16 +264,19 @@ def build(args: argparse.Namespace) -> None:
         (contents / MARKER).write_text(json.dumps(marker, indent=2) + "\n", encoding="utf-8")
 
         if replace_output:
-            backup = stage.with_name(stage.name + ".previous")
-            os.replace(output, backup)
-            try:
-                os.replace(stage, output)
-            except BaseException:
-                os.replace(backup, output)
-                raise
-            shutil.rmtree(backup)
+            output_stat = output.stat(follow_symlinks=False)
+            expected_identity = (output_stat.st_dev, output_stat.st_ino)
+            exchange_directories(stage, output)
+            replaced_stat = stage.stat(follow_symlinks=False)
+            if (replaced_stat.st_dev, replaced_stat.st_ino) != expected_identity:
+                exchange_directories(stage, output)
+                fail("synthetic Xcode output changed during owned replacement")
+            shutil.rmtree(stage)
         else:
-            os.replace(stage, output)
+            try:
+                publish_directory_noreplace(stage, output)
+            except FileExistsError:
+                fail(f"output appeared during publication; refusing to replace it: {output}")
     except BaseException:
         if stage.exists():
             shutil.rmtree(stage)

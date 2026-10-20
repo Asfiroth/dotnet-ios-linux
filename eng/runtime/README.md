@@ -36,8 +36,14 @@ The source revision uses Microsoft Mono LLVM packages at version
 not assumed compatible. `acquire-llvm.py` restores the exact Linux-x64 SDK and
 Tools packages into an isolated cache, verifies their locked SHA-256 hashes and
 source commit, and overlays their `tools/linux-x64` payloads into one
-`bin`/`include`/`lib` root. `--without-llvm` is available only as an explicit
-feasibility mode; the scripts never accept and ignore `--llvm`.
+`bin`/`include`/`lib` root. It records a file/mode/symlink inventory and rechecks
+the complete assembled root before reuse, even when the package cache has been
+deleted. New roots and AOT pack directories are published atomically without
+replacing a concurrently created path; explicit replacement of a verified owned
+LLVM root uses an atomic directory exchange. `--without-llvm` is available only
+as an explicit feasibility mode;
+the installer never accepts a non-LLVM pack and no script accepts and ignores
+`--llvm`.
 
 The direct CMake build writes truthful standalone version metadata
 (`10.0.12.0` plus the dotnet/runtime source commit) before configuration. It
@@ -47,6 +53,13 @@ runtime libraries beside `mono-aot-cross`; its `$ORIGIN` runtime path therefore
 does not depend on an ambient `LD_LIBRARY_PATH`. Pack staging requires the
 adjacent compiler-build provenance file and rejects a copied or mismatched
 binary/root combination.
+
+`verify-source.sh` permits only the exact pinned runtime commit in either a
+pristine state or with the byte-for-byte locked three-file patch. Staged,
+untracked, or unrelated tracked source changes fail before configuration. The
+LLVM-enabled compiler and its copied `llc`, `opt`, libc++, and libc++abi payloads
+must match the output hashes in `toolchain.lock.json`; a merely plausible
+version string is insufficient.
 
 `verify-compiler-smoke.py` compiles every discovered method in one managed
 assembly. It checks both the compiler's LLVM object and the Clang-assembled Mono

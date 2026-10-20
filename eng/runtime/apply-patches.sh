@@ -25,10 +25,12 @@ actual_revision="$(git -C "$source_root" rev-parse HEAD)"
     exit 1
 }
 
-if git -C "$source_root" apply --reverse --check "$patch_file" >/dev/null 2>&1; then
+source_state="$("$script_dir/verify-source.sh" --source "$source_root" --state either)"
+if [[ "$source_state" == runtime_source_state=patched ]]; then
     printf 'runtime patch already applied\n'
 elif git -C "$source_root" apply --check "$patch_file"; then
     git -C "$source_root" apply "$patch_file"
+    "$script_dir/verify-source.sh" --source "$source_root" --state patched >/dev/null
     printf 'runtime patch applied\n'
 else
     printf 'runtime patch does not apply cleanly; source changes were preserved\n' >&2

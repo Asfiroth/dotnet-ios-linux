@@ -1,106 +1,144 @@
 # dotnet-ios-linux
 
-A proposed Linux host compatibility layer for .NET for iOS. The goal is to build, sign, install, and launch an ordinary `net10.0-ios` application on a physical iPhone using standard .NET tooling.
+An experimental Linux host compatibility layer for building, signing, installing,
+and launching an ordinary `net10.0-ios` application on a physical iPhone with
+standard .NET and MSBuild contracts.
 
-**Status: experimental M2–M9 positive-path proof.** The repository includes a
-transactional importer for a user-supplied Xcode 27 archive, a validated
-synthetic-Xcode builder, fail-closed `xcrun`/`xcodebuild` contracts, and a pinned
-Linux-hosted Mono iOS AOT cross compiler. The unchanged `HelloIos` project now
-passes the macios trim, LLVM AOT, native compile, native link, and unsigned app
-bundle pipeline entirely on Linux. Its executable is Mach-O arm64 for iOS 15.0,
-records SDK 27.0, and starts without a code-signature load command. A validated
-Apple development identity/profile then signs a copy with pinned `rcodesign`,
-and pinned `pymobiledevice3` installs the exact bundle over USB without
-auto-pairing or identifier output. A manual icon launch now displays stable UI
-after executing generic AOT, managed-exception, P/Invoke, and native-callback
-probes. A subsequent incremental LLVM AOT/native-link rebuild was freshly
-signed, installed as a replacement, manually launched, force-quit, and cold
-relaunched with the same results and no observed crash activity. This completes
-the minimal UIKit device MVP. Automated CoreDevice launch remains blocked on an
-operator-approved personalized Developer Disk Image; negative deployment,
-lifecycle, Rider, and Uno remain unverified, so this is not yet a working iOS
-development distribution.
+**Status: M2–M9 physical-device proof passed; bootstrap candidate under
+validation.** The unchanged `tests/HelloIos/HelloIos.csproj` passes trimming,
+LLVM AOT, native compilation/linking, unsigned bundling, development signing,
+USB replacement installation, manual launch, and cold relaunch on the pinned
+stack. Runtime probes cover generics, managed exceptions, P/Invoke, and a
+native-to-managed callback. Automated CoreDevice launch, Rider, stock
+`uno-check`, minimal Uno, and negative deployment coverage remain separate
+unpassed gates.
 
-Read the [project specification](docs/specification.md) for architecture,
-implementation requirements, milestones M0–M10, validation, and release
-criteria.
+The root bootstrap and its SDK/workload ownership helpers now pass isolated
+install, update, list, restore, repair, uninstall, clean, reinstall, rollback,
+and real Android/Wasm coexistence exercises. A complete top-level bootstrap run
+is still pending because validation has the extracted `Xcode.app`, not the
+authentic `Xcode_27.xip` that the installer intentionally requires.
 
-Implementation entry points:
+## Install
 
-- [`eng/toolchain/README.md`](eng/toolchain/README.md) — import an iPhoneOS SDK and create the synthetic Xcode tree.
-- [`eng/runtime/README.md`](eng/runtime/README.md) — acquire, patch, build, smoke-test, and package the matched AOT compiler.
-- [`src/README.md`](src/README.md) — package templates, MSBuild integration, and Linux host shims.
-- [`tests/contracts/README.md`](tests/contracts/README.md) — run SDK-free host contract tests.
-- [`tests/integration/README.md`](tests/integration/README.md) — run macios discovery/compiler-selection gates and the private-SDK app build gate.
-- [`docs/README.md`](docs/README.md) — specification, evidence policy, compatibility status, and governance.
+The installer supports glibc Linux x86_64 only. It requires ordinary host build
+commands including Bash, Python 3.10+, Git, curl, CMake, Ninja, Make, Clang,
+binutils, `flock`, and the standard checksum/archive tools. It never invokes a
+distro package manager or writes to `/usr`.
 
-## Repository layout
+Supply the exact authentic Xcode `27.0 (27A266a)` archive yourself:
 
-- `src/` contains product-facing MSBuild integration, package templates, and
-  host shims.
-- `eng/` contains maintainer tooling for runtime construction, SDK import,
-  signing/deployment, and evidence validation.
-- `tests/` contains unchanged application fixtures plus public contract and
-  private integration gates.
-- `docs/` contains durable architecture, status, evidence, and governance
-  material.
+```sh
+./install.sh install --xcode-archive /private/path/Xcode_27.xip
+source "${XDG_DATA_HOME:-$HOME/.local/share}/dotnet-ios-linux/activate"
+./install.sh doctor
+```
 
-Run the SDK-free repository checks with:
+The archive must have SHA-256
+`6a270c53a5a0c5e0ac78125342d44c3cfff2716ec390373cd5e30834d80a67c3`.
+Apple files are imported locally without metadata changes and are never part of
+this repository or its releases.
+
+Useful install options:
+
+```sh
+# Reuse an already validated, LLVM-enabled local AOT pack.
+./install.sh install --xcode-archive /private/path/Xcode_27.xip \
+  --aot-pack /private/path/aot-pack
+
+# Print the plan without creating the data or cache roots.
+./install.sh install --xcode-archive /private/path/Xcode_27.xip \
+  --aot-pack /private/path/aot-pack --offline --dry-run
+
+# Reuse complete, hash-verified caches without downloads.
+./install.sh install --xcode-archive /private/path/Xcode_27.xip --offline
+```
+
+`--offline` is fail-closed: every required archive, source checkout, SwiftPM
+dependency, Python wheel, LLVM package, and workload package must already be in
+the project cache. `--jobs N` controls the Mono compiler build. `--yes` suppresses
+the canonical-root confirmation.
+
+Installation locations are fixed by policy:
+
+- .NET SDK and workloads: `~/.dotnet`
+- durable project data: `${XDG_DATA_HOME:-$HOME/.local/share}/dotnet-ios-linux`
+- disposable downloads/builds: `${XDG_CACHE_HOME:-$HOME/.cache}/dotnet-ios-linux`
+
+The installer merges SDK `10.0.402` without replacing conflicting files, uses a
+private `global.json` to pin workload set `10.0.401.1`, installs workload ID
+`ios`, and verifies every archive in the 12-package direct graph against
+`toolchain.lock.json`. Official NuGet archives must also pass author/repository
+signature verification; the deterministic local derivative and project packs
+are explicitly unsigned and hash-trusted. Downloads and staged directories use
+randomized reservations and atomic no-clobber publication. It does not edit
+shell startup files. Source `activate` explicitly in each shell or configure the
+same environment in your IDE.
+
+## Uninstall and cache policy
+
+```sh
+./install.sh uninstall
+./install.sh uninstall --yes --purge-cache
+```
+
+Uninstall preflights hashes and removes only receipt-owned SDK, workload, and
+durable entries. It preserves unrelated SDKs, later workloads, workload history,
+and unknown files. A changed owned file blocks removal rather than being erased.
+The cache is preserved by default; deleting it does not break an installed
+toolchain. `--purge-cache` is valid only with uninstall.
+
+## Safety boundaries
+
+- Xcode must be operator-supplied; Apple SDKs are neither downloaded nor
+  redistributed by the project.
+- Swift 6.4.0, ncurses 6.6, libxml2 2.13.9, portable CPython 3.14.8, uv 0.9.10,
+  xtool, rcodesign, pymobiledevice3, LLVM, and every workload package are pinned
+  and hash checked.
+- LLVM is mandatory in the installed AOT pack. A non-LLVM feasibility artifact
+  cannot enter the workload feed.
+- Signing, installation, and launch are explicit separate actions. Setup never
+  loads credentials, pairs a device, signs an app, installs an app, or launches
+  one.
+- Credentials, profiles, pairing records, Apple archives, signed apps, raw
+  binlogs, and device identifiers remain outside managed project data.
+- `tests/HelloIos/HelloIos.csproj` and `tests/AotProbe/AotProbe.csproj` remain
+  ordinary, unchanged .NET projects.
+
+## Baseline and scope
+
+The active baseline is SDK `10.0.402`, feature band `10.0.400`, workload set
+`10.0.401.1`, macios `27.0.10722`, runtime `10.0.12`, matched Mono LLVM
+`19.1.0-alpha.1.25461.1`, Xcode `27.0 (27A266a)`, and iPhoneOS
+`27.0 (24A430)`. The first target is glibc Linux x86_64, `net10.0-ios`,
+`ios-arm64`, Mono, and a physical iPhone over USB.
+
+Simulator support, Linux arm64/musl, NativeAOT, CoreCLR, wireless deployment,
+managed debugging, hot reload, and App Store distribution are outside this MVP.
+
+## Validation and documentation
+
+Run all public SDK-free repository checks with:
 
 ```sh
 eng/evidence/validate-repository.sh
 ```
 
-## Design commitments
+Key references:
 
-- Preserve the contracts of `dotnet`, MSBuild, Rider, and stock `uno-check`.
-- Use `~/.dotnet` as the canonical development SDK root, including all participating workloads.
-- Keep workload ID `ios`; provide a Linux-capable workload manifest and project-owned host tooling.
-- Reuse official `Microsoft.iOS.*` packs and the device runtime wherever possible.
-- Present a synthetic Xcode layout through `DEVELOPER_DIR`; prefer compatible tools and shims over forks.
-- Reuse pinned components from [omarchy-apple-dev](https://github.com/joshuaswarren/omarchy-apple-dev) for Darwin tooling, signing, and device operations.
-- Keep application projects portable between Linux and macOS without custom SDK names or Linux-only build switches.
-
-## First target
-
-Linux x86_64, initially EndeavourOS/Arch; .NET 10; `net10.0-ios`; `ios-arm64`; Mono; physical iPhone over USB; Xcode `27.0 (27A266a)` and iPhoneOS `27.0 (24A430)`. The active candidate baseline is .NET SDK `10.0.402`, workload set `10.0.401.1`, and macios `27.0.10722`, selected from the supplied Mac reference. Linux app linking, development signing, USB installation, manual launch, visible UI, and deterministic AOT probes are verified for the minimal UIKit sample.
-
-Simulator support, NativeAOT, CoreCLR, wireless deployment, managed debugging, hot reload, and App Store distribution are outside the first MVP.
-
-## Intended workflow
-
-The following is a target user experience, **not runnable installation instructions**:
-
-```sh
-# One-time bootstrap will install the compatibility distribution.
-dotnet-ios-linux setup
-
-# Shell and Rider must use this same SDK.
-export DOTNET_ROOT="$HOME/.dotnet"
-export PATH="$DOTNET_ROOT:$DOTNET_ROOT/tools:$PATH"
-export DEVELOPER_DIR="$HOME/.local/share/dotnet-ios-linux/Xcode.app/Contents/Developer"
-
-dotnet workload install ios
-dotnet workload list
-dotnet new ios -n HelloIos
-cd HelloIos
-dotnet build -f net10.0-ios -r ios-arm64 -c Release
-```
-
-Setup will also provide the shim environment and package-source configuration. Signing requires a configured development identity and provisioning profile. For a private Mac build, standard `CodesignKey` and `CodesignProvision` selectors may be set in local project configuration or passed as MSBuild properties; selectors must be redacted from shared evidence, and profiles or credentials must never be passed as arguments. Stock `uno-check` will use the distribution's custom manifest. Normal MSBuild `Run` integration is planned after separate signing, installation, and launch have been proven.
-
-## Implementation starts here
-
-1. Capture the exact working Mac toolchain and package graph; record checksums and source revisions.
-2. Prove one unambiguous Linux manifest can expose workload `ios` and evaluate the minimal application in the canonical SDK root.
-3. Restore the required official packs and record the next host dependency.
-4. Start the Mono AOT compiler feasibility experiment early, before polishing the installer or IDE workflow.
-
-M0–M6 establish an unsigned build, M7–M9 establish the physical-device MVP, and M10 explores native debugging. The private M2–M6 technical gate and full M7–M9 positive path pass for the pinned inputs, including clean and incremental bundle launches plus cold relaunch. Negative deployment coverage and workload lifecycle remain open.
+- [`docs/specification.md`](docs/specification.md) — architecture, lifecycle,
+  milestones, validation, and claim boundaries.
+- [`eng/toolchain/README.md`](eng/toolchain/README.md) — Apple SDK import,
+  portable host tools, signing, and device actions.
+- [`eng/runtime/README.md`](eng/runtime/README.md) — matched Mono/LLVM compiler.
+- [`tests/contracts/README.md`](tests/contracts/README.md) — SDK-free contracts.
+- [`tests/integration/README.md`](tests/integration/README.md) — private SDK,
+  workload, AOT, and native-link gates.
+- [`toolchain.lock.json`](toolchain.lock.json) — canonical pins and hashes.
 
 ## License
 
-Original project content is available under the [MIT License](LICENSE).
-Third-party tools, SDKs, sources, and generated artifacts remain subject to
-their own terms; see the
-[provenance policy](docs/governance/provenance-and-redistribution.md).
+Project-owned source is available under the [MIT License](LICENSE):
+`Copyright (c) 2026 Asfiroth`.
+Third-party software and Apple materials remain subject to their own terms; see
+the [provenance policy](docs/governance/provenance-and-redistribution.md).
