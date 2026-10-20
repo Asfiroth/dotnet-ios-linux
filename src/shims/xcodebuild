@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+"""Run the version-query-only xcodebuild contract implemented by xcrun."""
+
+from pathlib import Path
+import os
+import runpy
+
+
+os.environ["DOTNET_IOS_LINUX_INVOKED_AS"] = "xcodebuild"
+runpy.run_path(str(Path(__file__).with_name("xcrun")), run_name="__main__")

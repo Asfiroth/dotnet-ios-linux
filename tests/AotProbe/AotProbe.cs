@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using ObjCRuntime;
 
 namespace AotProbe;
 
@@ -42,6 +43,7 @@ public static class DeviceAotProbe
         }
     }
 
+    [MonoPInvokeCallback(typeof(IntComparer))]
     private static int Compare(IntPtr left, IntPtr right) => Marshal.ReadInt32(left).CompareTo(Marshal.ReadInt32(right));
 
     private sealed class ProbeException(int code) : Exception

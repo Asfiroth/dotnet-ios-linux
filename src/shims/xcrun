@@ -1,0 +1,396 @@
+#!/usr/bin/env python3
+"""Minimal, fail-closed xcrun contract for the Linux iOS build slice."""
+
+from __future__ import annotations
+
+import json
+import os
+import plistlib
+import re
+import sys
+from pathlib import Path
+
+
+SUPPORTED_SDK = "iphoneos"
+SUPPORTED_TOOLS = {"clang", "clang++", "mdimport", "xcodebuild"}
+QUERY_OPTIONS = {
+    "--show-sdk-path",
+    "--show-sdk-version",
+    "--show-sdk-build-version",
+    "--show-sdk-platform-path",
+    "--show-sdk-platform-version",
+}
+
+
+class ContractError(Exception):
+    pass
+
+
+def fail(message: str, exit_code: int = 64) -> "None":
+    print(f"dotnet-ios-linux xcrun: {message}", file=sys.stderr)
+    raise SystemExit(exit_code)
+
+
+def developer_root() -> Path:
+    raw = os.environ.get("DEVELOPER_DIR")
+    if not raw:
+        raise ContractError("DEVELOPER_DIR is required")
+
+    root = Path(raw).expanduser()
+    if root.name.endswith(".app"):
+        root = root / "Contents" / "Developer"
+    elif root.name == "Contents":
+        root = root / "Developer"
+
+    root = root.resolve()
+    platform = root / "Platforms" / "iPhoneOS.platform"
+    if not (platform / "Info.plist").is_file():
+        raise ContractError(f"invalid iPhoneOS developer root: {root}")
+    return root
+
+
+def load_plist(path: Path) -> dict:
+    try:
+        with path.open("rb") as stream:
+            value = plistlib.load(stream)
+    except (OSError, plistlib.InvalidFileException) as error:
+        raise ContractError(f"cannot read plist {path}: {error}") from error
+    if not isinstance(value, dict):
+        raise ContractError(f"plist root is not a dictionary: {path}")
+    return value
+
+
+def sdk_build_version(sdk: Path, settings: dict) -> str:
+    settings_build = settings.get("ProductBuildVersion")
+    if settings_build is not None and (not isinstance(settings_build, str) or not settings_build):
+        raise ContractError("SDKSettings.plist ProductBuildVersion must be a non-empty string")
+
+    system_path = sdk / "System" / "Library" / "CoreServices" / "SystemVersion.plist"
+    system_build = None
+    if system_path.is_file():
+        system_version = load_plist(system_path)
+        system_build = system_version.get("ProductBuildVersion")
+        if system_build is not None and (not isinstance(system_build, str) or not system_build):
+            raise ContractError("SystemVersion.plist ProductBuildVersion must be a non-empty string")
+
+    if settings_build and system_build and settings_build != system_build:
+        raise ContractError(
+            "SDKSettings.plist and SystemVersion.plist ProductBuildVersion values disagree"
+        )
+    if settings_build:
+        return settings_build
+    if system_build:
+        return system_build
+    raise ContractError(
+        "SDK lacks ProductBuildVersion in SDKSettings.plist and SystemVersion.plist"
+    )
+
+
+def sdk_details(root: Path) -> tuple[Path, str, str, Path, str]:
+    platform = root / "Platforms" / "iPhoneOS.platform"
+    sdks = platform / "Developer" / "SDKs"
+    candidates = sorted(
+        path
+        for path in sdks.glob("iPhoneOS*.sdk")
+        if path.name != "iPhoneOS.sdk" and (path / "SDKSettings.plist").is_file()
+    )
+    if len(candidates) != 1:
+        raise ContractError(
+            f"expected exactly one versioned iPhoneOS SDK under {sdks}, found {len(candidates)}"
+        )
+
+    sdk = candidates[0]
+    settings = load_plist(sdk / "SDKSettings.plist")
+    canonical = settings.get("CanonicalName")
+    if not isinstance(canonical, str) or not canonical.startswith(SUPPORTED_SDK):
+        raise ContractError(f"unsupported SDK CanonicalName: {canonical!r}")
+
+    version = settings.get("Version")
+    if not isinstance(version, str) or not version:
+        version = canonical[len(SUPPORTED_SDK) :]
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,2}", version):
+        raise ContractError(f"invalid iPhoneOS SDK version: {version!r}")
+    if canonical != f"{SUPPORTED_SDK}{version}":
+        raise ContractError(f"SDK CanonicalName {canonical!r} does not match version {version!r}")
+    sdk_build = sdk_build_version(sdk, settings)
+
+    platform_info = load_plist(platform / "Info.plist")
+    additional = platform_info.get("AdditionalInfo", {})
+    platform_version = additional.get("DTPlatformVersion", version)
+    if not isinstance(platform_version, str):
+        raise ContractError("DTPlatformVersion must be a string")
+
+    platform_version_plist = load_plist(platform / "version.plist")
+    platform_build = platform_version_plist.get("ProductBuildVersion")
+    if not isinstance(platform_build, str) or not platform_build:
+        raise ContractError("iPhoneOS.platform/version.plist lacks ProductBuildVersion")
+
+    return sdk, version, sdk_build, platform, platform_version
+
+
+def xcode_details(root: Path) -> tuple[str, str]:
+    version_plist = load_plist(root.parent / "version.plist")
+    version = version_plist.get("CFBundleShortVersionString")
+    build = version_plist.get("ProductBuildVersion")
+    if not isinstance(version, str) or not isinstance(build, str):
+        raise ContractError("Xcode version.plist lacks version/build metadata")
+    return version, build
+
+
+def synthetic_tool_path(root: Path, tool: str) -> Path:
+    if tool == "xcodebuild":
+        path = root / "usr" / "bin" / tool
+    else:
+        path = root / "Toolchains" / "XcodeDefault.xctoolchain" / "usr" / "bin" / tool
+    if not path.exists():
+        raise ContractError(f"supported tool entry point is missing: {path}")
+    return path
+
+
+def safe_which(name: str, root: Path) -> Path:
+    override_name = {
+        "clang": "DOTNET_IOS_LINUX_CLANG",
+        "clang++": "DOTNET_IOS_LINUX_CLANGXX",
+    }[name]
+    override = os.environ.get(override_name)
+    if override:
+        candidate = Path(override).expanduser().resolve()
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            raise ContractError(f"{override_name} is not executable: {candidate}")
+        return candidate
+
+    synthetic_root = root.resolve()
+    this_script = Path(__file__).resolve()
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        candidate = Path(directory) / name
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            continue
+        resolved = candidate.resolve()
+        if resolved == this_script or resolved == synthetic_root or synthetic_root in resolved.parents:
+            continue
+        return resolved
+    raise ContractError(f"no non-synthetic {name} backend found on PATH")
+
+
+def explicit_target(arguments: list[str]) -> str | None:
+    targets: list[str] = []
+    for index, argument in enumerate(arguments):
+        if argument in {"-target", "--target"}:
+            if index + 1 == len(arguments):
+                raise ContractError(f"{argument} requires a value")
+            targets.append(arguments[index + 1])
+        if argument.startswith("--target=") or argument.startswith("-target="):
+            targets.append(argument.split("=", 1)[1])
+    if len(targets) > 1:
+        raise ContractError("multiple explicit clang targets are unsupported")
+    return targets[0] if targets else None
+
+
+def adapted_clang_arguments(arguments: list[str], expected_sdk: Path) -> list[str]:
+    target = explicit_target(arguments)
+    architectures: list[str] = []
+    minimums: list[str] = []
+    sysroots: list[str] = []
+    for index, argument in enumerate(arguments):
+        if argument == "-arch":
+            if index + 1 == len(arguments):
+                raise ContractError("-arch requires a value")
+            architectures.append(arguments[index + 1])
+        if argument in {"-isysroot", "--sysroot"}:
+            if index + 1 == len(arguments):
+                raise ContractError(f"{argument} requires a value")
+            sysroots.append(arguments[index + 1])
+        if argument.startswith("--sysroot="):
+            sysroots.append(argument.split("=", 1)[1])
+        match = re.fullmatch(r"-m(?:iphoneos|ios)-version-min=(.+)", argument)
+        if match:
+            minimums.append(match.group(1))
+
+    is_action = any(
+        argument == "-o"
+        or argument in {"-c", "-S", "-E", "-fsyntax-only"}
+        or argument.startswith("@")
+        or Path(argument).suffix in {".a", ".c", ".cc", ".cpp", ".m", ".mm", ".o", ".s"}
+        for argument in arguments
+    )
+    if not is_action:
+        return arguments
+
+    if any(arch != "arm64" for arch in architectures) or len(architectures) > 1:
+        raise ContractError(f"expected exactly one '-arch arm64', got {architectures!r}")
+    if len(sysroots) != 1:
+        raise ContractError("exactly one iPhoneOS sysroot is required")
+    try:
+        actual_sdk = Path(sysroots[0]).expanduser().resolve(strict=True)
+        selected_sdk = expected_sdk.resolve(strict=True)
+    except OSError as error:
+        raise ContractError(f"cannot resolve iPhoneOS sysroot: {error}") from error
+    if actual_sdk != selected_sdk:
+        raise ContractError(f"unsupported sysroot: {sysroots[0]}")
+    if len(minimums) != 1:
+        raise ContractError("exactly one iPhoneOS minimum-version flag is required")
+    minimum = minimums[0]
+
+    if target:
+        if not re.fullmatch(r"arm64-apple-ios[0-9]+(?:\.[0-9]+){0,2}", target):
+            raise ContractError(f"unsupported explicit clang target: {target}")
+        adapted = list(arguments)
+    else:
+        if not minimum or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,2}", minimum):
+            raise ContractError("an iPhoneOS minimum-version flag is required")
+        adapted = [f"--target=arm64-apple-ios{minimum}", *arguments]
+
+    compile_only = any(argument in {"-c", "-S", "-E", "-fsyntax-only"} for argument in arguments)
+    has_linker = any(argument.startswith("-fuse-ld=") for argument in arguments)
+    if not compile_only and not has_linker:
+        adapted.insert(1, "-fuse-ld=lld")
+    return adapted
+
+
+def log_invocation(tool: str, backend: Path, arguments: list[str]) -> None:
+    path = os.environ.get("DOTNET_IOS_LINUX_TOOL_LOG")
+    if not path:
+        return
+    record = {"tool": tool, "backend": str(backend), "arguments": arguments}
+    try:
+        with Path(path).open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record, separators=(",", ":")) + "\n")
+    except OSError as error:
+        raise ContractError(f"cannot write tool log {path}: {error}") from error
+
+
+def execute_tool(root: Path, tool: str, arguments: list[str]) -> "None":
+    if tool == "xcodebuild":
+        xcodebuild(root, arguments)
+        return
+    if tool == "mdimport":
+        mdimport(arguments)
+        return
+    if tool not in {"clang", "clang++"}:
+        raise ContractError(f"unsupported tool: {tool}")
+
+    backend = safe_which(tool, root)
+    sdk, _, _, _, _ = sdk_details(root)
+    adapted = adapted_clang_arguments(arguments, sdk)
+    log_invocation(tool, backend, adapted)
+    os.execv(str(backend), [str(backend), *adapted])
+
+
+def mdimport(arguments: list[str]) -> None:
+    if len(arguments) != 1 or arguments[0].startswith("-"):
+        raise ContractError("mdimport requires exactly one directory path")
+    try:
+        input_directory = Path(arguments[0]).expanduser().resolve(strict=True)
+    except OSError as error:
+        raise ContractError(f"cannot resolve mdimport input: {error}") from error
+    if not input_directory.is_dir():
+        raise ContractError(f"mdimport input is not a directory: {input_directory}")
+    log_invocation("mdimport", Path(__file__).resolve(), [str(input_directory)])
+    print(
+        f"dotnet-ios-linux xcrun: Spotlight indexing is unavailable on Linux; "
+        f"validated and skipped {input_directory}",
+        file=sys.stderr,
+    )
+
+
+def xcodebuild(root: Path, arguments: list[str]) -> "None":
+    version, build = xcode_details(root)
+    sdk, sdk_version, _, _, platform_version = sdk_details(root)
+    if arguments == ["-version"]:
+        print(f"Xcode {version}")
+        print(f"Build version {build}")
+        return
+    if arguments == ["-showsdks"]:
+        print("iOS SDKs:")
+        print(f"\tiOS {sdk_version}\t\t-sdk iphoneos{sdk_version}")
+        return
+    if arguments in (["-version", "-sdk", SUPPORTED_SDK], ["-sdk", SUPPORTED_SDK, "-version"]):
+        print(f"iPhoneOS{sdk_version}.sdk - iOS {sdk_version} (iphoneos{sdk_version})")
+        print(f"SDKVersion: {sdk_version}")
+        print(f"Path: {sdk}")
+        print(f"PlatformVersion: {platform_version}")
+        return
+    raise ContractError("unsupported xcodebuild operation (only version and SDK listing queries are implemented)")
+
+
+def parse_xcrun(arguments: list[str]) -> tuple[str, str | None, str | None, list[str]]:
+    sdk = SUPPORTED_SDK
+    query: str | None = None
+    find: str | None = None
+    tool: str | None = None
+    tool_arguments: list[str] = []
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if tool is not None:
+            tool_arguments.extend(arguments[index:])
+            break
+        if argument in {"--sdk", "-sdk"}:
+            index += 1
+            if index == len(arguments):
+                raise ContractError(f"{argument} requires a value")
+            sdk = arguments[index].lower()
+        elif argument in QUERY_OPTIONS:
+            if query is not None:
+                raise ContractError("only one SDK query may be requested")
+            query = argument
+        elif argument in {"--find", "-find", "-f"}:
+            index += 1
+            if index == len(arguments):
+                raise ContractError(f"{argument} requires a tool name")
+            find = arguments[index]
+        elif argument == "--run":
+            pass
+        elif argument.startswith("-"):
+            raise ContractError(f"unsupported xcrun option: {argument}")
+        else:
+            tool = argument
+        index += 1
+
+    if sdk != SUPPORTED_SDK:
+        raise ContractError(f"unsupported SDK {sdk!r}; only {SUPPORTED_SDK!r} is implemented")
+    selected = [query is not None, find is not None, tool is not None]
+    if sum(selected) != 1:
+        raise ContractError("request exactly one SDK query, tool lookup, or tool execution")
+    return sdk, query, find or tool, tool_arguments
+
+
+def main() -> None:
+    invoked_as = os.environ.pop("DOTNET_IOS_LINUX_INVOKED_AS", Path(sys.argv[0]).name)
+    try:
+        root = developer_root()
+        if invoked_as == "xcodebuild":
+            xcodebuild(root, sys.argv[1:])
+            return
+        if invoked_as in {"clang", "clang++", "mdimport"}:
+            execute_tool(root, invoked_as, sys.argv[1:])
+            return
+
+        _, query, tool, tool_arguments = parse_xcrun(sys.argv[1:])
+        if query:
+            sdk, version, build, platform, platform_version = sdk_details(root)
+            values = {
+                "--show-sdk-path": str(sdk),
+                "--show-sdk-version": version,
+                "--show-sdk-build-version": build,
+                "--show-sdk-platform-path": str(platform),
+                "--show-sdk-platform-version": platform_version,
+            }
+            print(values[query])
+            return
+
+        assert tool is not None
+        if tool not in SUPPORTED_TOOLS:
+            raise ContractError(f"unsupported tool: {tool}")
+        if not tool_arguments and any(option in sys.argv[1:] for option in {"--find", "-find", "-f"}):
+            print(synthetic_tool_path(root, tool))
+            return
+        execute_tool(root, tool, tool_arguments)
+    except ContractError as error:
+        fail(str(error))
+
+
+if __name__ == "__main__":
+    main()

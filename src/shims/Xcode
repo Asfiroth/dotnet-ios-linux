@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+"""Fail-closed structural Xcode.app entry point for the synthetic bundle."""
+
+import sys
+
+
+print("dotnet-ios-linux: launching the synthetic Xcode application is unsupported", file=sys.stderr)
+raise SystemExit(64)

@@ -1,8 +1,10 @@
 # Evidence Receipt Protocol
 
-Receipts are immutable, sanitized records of an observed experiment. They are
-stored at `receipts/<milestone>/<receipt-id>.json` and validated against
-`receipts/receipt.schema.json`.
+Receipts are immutable, sanitized records of an observed experiment. The
+dependency-free contract below is enforced by
+`eng/evidence/validate-receipt.py`. A committed JSON Schema and sanitized
+receipt publication directory remain future work; raw captures stay outside the
+repository.
 
 ## Required properties
 

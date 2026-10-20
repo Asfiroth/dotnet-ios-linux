@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "identity": {
+    "p12": "/private/path/to/apple-development.p12",
+    "passwordFile": "/private/path/to/p12-password.txt"
+  },
+  "provisioningProfile": "/private/path/to/development.mobileprovision",
+  "expectedTeamIdentifier": "REPLACE_WITH_TEAM_ID",
+  "expectedBundleIdentifier": "dev.dotnetioslinux.helloios"
+}

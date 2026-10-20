@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the repository's dependency-free subset of receipt.schema.json."""
+"""Validate the repository's dependency-free evidence-receipt contract."""
 
 from __future__ import annotations
 

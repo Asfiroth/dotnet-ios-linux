@@ -21,6 +21,7 @@ artifacts/
 .env.*
 !.env.example
 *.p12
+*.pfx
 *.p8
 *.mobileprovision
 *.provisionprofile
@@ -28,9 +29,18 @@ artifacts/
 *.pem
 *.key
 secrets/
+signing-config.json
+*.signing-private.json
 receipts/
+# Legacy and generic private-capture quarantine. Canonical evidence output is
+# written outside the repository.
 macios-references/
+private-evidence/
 
 # OS files
 .DS_Store
 Thumbs.db
+
+# Python tooling caches
+__pycache__/
+*.py[cod]

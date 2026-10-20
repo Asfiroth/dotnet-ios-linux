@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('linux')) And '$(XcodeLocation)' == '' And '$(DEVELOPER_DIR)' != ''">
+    <!-- macios 27.0.10722 passes XcodeLocation to DetectSdkLocations but does not
+         map DEVELOPER_DIR itself on Linux. XcodeLocation expects Xcode.app. -->
+    <XcodeLocation>$([MSBuild]::NormalizePath('$(DEVELOPER_DIR)', '..', '..'))</XcodeLocation>
+  </PropertyGroup>
+</Project>

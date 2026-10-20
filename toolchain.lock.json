@@ -2,8 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "schemaVersion": 1,
   "status": "active-candidate",
-  "generatedAtUtc": "2026-10-17T00:00:00Z",
-  "purpose": "Rebaselined M0 candidate. Source integrity and Mac observation are recorded; Linux compatibility remains unverified.",
+  "generatedAtUtc": "2026-10-20T00:00:00Z",
+  "purpose": "M2-M9 positive-path implementation candidate. Authentic Xcode 27 SDK import, synthetic-Xcode discovery, matched LLVM Linux-to-iOS AOT/native link, development signing, USB installation, clean and incremental rebuild launches, visible UI, deterministic runtime probes, and cold relaunch are verified.",
+  "projectLicense": {
+    "spdx": "MIT",
+    "file": "LICENSE",
+    "sha256": "9f22c103cb1931598208d7e6fb75bec096abd91829cfdea7f445a1b0f2fd5059",
+    "copyright": "Copyright (c) 2026 Asfiroth"
+  },
   "supersedes": {
     "lockSha256": "e647355a38ec868caca79f764ff38f13e944df53f47026689b4c0bec06c4ee4f",
     "historicalLock": "receipts/locks/e647355a38ec868caca79f764ff38f13e944df53f47026689b4c0bec06c4ee4f.json",
@@ -85,13 +91,133 @@
       }
     ],
     "monoRuntime": {
-      "status": "Mac pack provenance observed; matching runtime source and Linux compiler configuration unresolved",
+      "status": "matching runtime source, LLVM-enabled Linux compiler, macios HelloIos AOT/native link, development signing, USB installation, and full M9 clean/incremental physical-device runtime sequence verified locally",
+      "sourceRepository": "https://github.com/dotnet/runtime.git",
+      "sourceTag": "v10.0.12",
+      "sourceCommit": "4271d88e0aebf3d04f188f1334c2220d80555ef6",
+      "vmrCommit": "95017c711e6afc1085133d440e42b4bd78155701",
+      "compilerConfiguration": {
+        "host": "linux-x64-glibc",
+        "targetTriple": "aarch64-apple-darwin10",
+        "offsets": "src/mono/mono/offsets/aarch64-apple-darwin10.h",
+        "patch": "eng/runtime/patches/0001-linux-host-apple-mobile-aot-cross.patch",
+        "versionMetadata": "standalone build reports 10.0.12.0 and the dotnet/runtime source commit; it does not reuse the official VMR build number",
+        "nonLlvmEvidence": "compiler executes as ELF x86-64, reports arm64, compiles AotProbe.dll, and emits assembly accepted by Clang as a Mach-O arm64 relocatable object",
+        "llvmEvidence": "compiler reports LLVM yes(1900), compiles all 3947 AotProbe methods, invokes the exact matched opt/llc, and emits separate Mono and LLVM Mach-O arm64 relocatable objects",
+        "maciosSelectionEvidence": "the pinned macios _FindAotCompiler task selects the staged MonoAotCrossCompiler item for ios-arm64",
+        "acceptanceBoundary": "The private HelloIos gate satisfies the unsigned M4/M5 compiler and native-link boundary. Clean-build and subsequent incremental-build bundles were separately signed, installed, and manually launched; both passed the visible runtime probes, and the incremental bundle passed a cold relaunch."
+      },
+      "llvm": {
+        "status": "exact Linux-x64 SDK and Tools packages hash-verified; compiler build, tool execution, and dual Mach-O object smoke verified",
+        "major": 19,
+        "packageVersion": "19.1.0-alpha.1.25461.1",
+        "feed": "https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet10/nuget/v3/index.json",
+        "sourceCommit": "2cfe42ea4a7fe364dcb197beca469af8edec0ad6",
+        "packages": [
+          {
+            "id": "runtime.linux-x64.Microsoft.NETCore.Runtime.Mono.LLVM.Sdk",
+            "sha256": "0ab321b6a5b4a7cb159b12c5c1e14daa034a50bfae3afecd0b8737649b4811cc"
+          },
+          {
+            "id": "runtime.linux-x64.Microsoft.NETCore.Runtime.Mono.LLVM.Tools",
+            "sha256": "1f2783be29b44c9d53b1f11048de8f123089fafc475a30f6b6494204b842d043"
+          }
+        ],
+        "localSmoke": {
+          "compilerSha256": "c85a0aad43764e9d17077f23faf6e638e79b47b315263116b2350038d977866d",
+          "inputAssemblySha256": "0447af54e1c408cc1cb8755b4b44f5c56126133128c955120a988201571205e8",
+          "compiledMethods": 3947,
+          "monoObjectFormat": "Mach-O 64-bit arm64 relocatable",
+          "llvmObjectFormat": "Mach-O 64-bit arm64 relocatable",
+          "outputHashPolicy": "Generated smoke evidence records per-run object hashes and AOTID; LLVM output is not treated as byte-for-byte deterministic across invocations.",
+          "scope": "local compiler smoke only; artifacts are not committed and this is not M4 acceptance"
+        },
+        "policy": "--without-llvm must be explicit; --llvm is never accepted and ignored"
+      },
+      "linuxAppIntegration": {
+        "status": "private M2-M6 gate passed",
+        "gate": "tests/integration/build-hello-ios.sh",
+        "projectsUnchanged": [
+          "tests/HelloIos/HelloIos.csproj",
+          "tests/AotProbe/AotProbe.csproj"
+        ],
+        "postProcessingPolicy": "The unsigned gate sets standard macios NoDSymUtil=true and NoSymbolStrip=true; Spotlight indexing is explicitly validated and skipped because Linux has no Spotlight service.",
+        "compilerSha256": "c85a0aad43764e9d17077f23faf6e638e79b47b315263116b2350038d977866d",
+        "aotProbeMonoObjectSha256": "aef573015966de2061a2c60698e2519db82e7d800b24efcb5eb9c03cbd0f0cc5",
+        "aotProbeLlvmObjectSha256": "e90ccb7cbdbb4b7a5ad7d54bed76bbc465a9d5a19b23939888d0cc34f17d462a",
+        "aotProbeCallbackWrapper": "wrapper_native_to_managed_AotProbe_DeviceAotProbe_Compare_intptr_intptr",
+        "aotProbeCallbackEvidenceSha256": "46ad0ce36ea7223c62df92b6b38887ce9671fae9d1dddb44939ecc3839f567ae",
+        "appExecutableSha256": "a9c6e24546ed9e33e20c2bd26512fe6e14cb851bf332bf06c677fde3a9799ea3",
+        "appExecutableBytes": 13310656,
+        "appExecutableFormat": "Mach-O 64-bit arm64 executable",
+        "deploymentTarget": "15.0",
+        "linkedSdkVersion": "27.0",
+        "codeSignatureLoadCommand": "absent",
+        "buildBinlogSha256": "a2d2bdeee67698711a6e4e12688c92af476295df87a6b27ed53434ed15af81c9",
+        "buildLogSha256": "547106158eb9f79cd86b33b496a1a22be367b8a9d2330e07d519f2cfaa136ea2",
+        "objectInspectionSha256": "795e582bcb942de1804894e7c34adb257a5d5120d19cdfd0230f8f5dfdaa774f",
+        "inspectionSha256": "fefd7f55062f25745017fe5b7f98d1145fc9534aee195fe1efc380b43e51b805",
+        "loadCommandsSha256": "53e0977135370f98050746821ed98e1bece55ac0cd6942c96cf4325ae5df9ea9",
+        "scope": "local private evidence; Apple SDK and generated app contents are not committed"
+      },
+      "deviceDeployment": {
+        "status": "M7-M9 positive paths passed, including clean and incremental rebuilt-bundle installs, manual launches, deterministic probes, and cold relaunch",
+        "signer": "rcodesign 0.29.0",
+        "deploymentTool": "pymobiledevice3 11.26.0",
+        "bundleIdentifier": "dev.dotnetioslinux.helloios",
+        "signingChecks": [
+          "P12 private key matches its certificate",
+          "profile CMS integrity and expiration validated",
+          "development entitlement, team, bundle coverage, and certificate membership validated",
+          "sole connected USB device is authorized by the profile",
+          "unsigned source was copied and remained byte-identical"
+        ],
+        "signedExecutableSha256": "338d2dafb07f23214dea65a32a5a9f212e6a5c67c3b202713924af888f4f8df0",
+        "signedExecutableBytes": 13423296,
+        "codeResourcesSha256": "3be43d94856917022299b4d2da008abaec1841e930762cec63f1da9e748f7ac5",
+        "deploymentTarget": "15.0",
+        "linkedSdkVersion": "27.0",
+        "codeSignatureLoadCommand": "present",
+        "installation": "succeeded over USB; exact installed bundle query succeeded; existing pairing only; autopair disabled",
+        "identifierPolicy": "device identifier remained in process memory and was not emitted or recorded",
+        "launch": "manual icon launch succeeded without a mounted personalized Developer Disk Image; the UI remained visible",
+        "automatedLaunch": "unavailable because a personalized Developer Disk Image is not mounted",
+        "runtimeProbe": {
+          "genericValue": "generic-aot",
+          "exceptionCode": 73,
+          "processId": "positive value displayed but not recorded",
+          "sortedChecksum": 1004
+        },
+        "repeatEvidence": {
+          "buildMode": "incremental rebuild from a private copy of the clean-build state; restore metadata was refreshed and a timestamp-only source invalidation was restored afterward without changing source contents",
+          "pipeline": "C# compilation, IL trimming, LLVM AOT, native compilation, and native linking all executed; no AOT command referenced the clean run directory",
+          "aotProbeMonoObjectSha256": "aef573015966de2061a2c60698e2519db82e7d800b24efcb5eb9c03cbd0f0cc5",
+          "aotProbeLlvmObjectSha256": "68a6a395bb627645a87ffaee375de36b0cf6fc11d93235b7acfc97731641d590",
+          "appExecutableSha256": "10b231e1e33316de8f9377769b0b033229f2e1c385c0741aa85f58e32828e752",
+          "appExecutableBytes": 13310656,
+          "buildBinlogSha256": "2323072e6c6a51cde97d18aa91ea8ee19ddff89384077faa5142d2693955c88e",
+          "buildLogSha256": "25fad7de84a17ffaf7d8f3df3be6c191d866a002c933d228c2508c418b450181",
+          "objectInspectionSha256": "b1d6ef093962f29e1e5db161f1ed858d1272b0029949c36a72f9ce7eb31eb7a3",
+          "callbackEvidenceSha256": "46ad0ce36ea7223c62df92b6b38887ce9671fae9d1dddb44939ecc3839f567ae",
+          "inspectionSha256": "656a6b5608e93eae19b214f8974932e67841ec4ed820bf3e477e2dab989b7a30",
+          "loadCommandsSha256": "2ec7e024abc6e2361cf1875fe0c2a41667e1f92908d9771a6abeab334a017188",
+          "signedExecutableSha256": "92a6cfebc9b357027f1f24fb8cdbfa5743c0bcc8467e328a6ddb4282bb3ba40f",
+          "signedExecutableBytes": 13423296,
+          "codeResourcesSha256": "bd7884863124948770e23c075d45b4987a59947c0456e061944665b4dfbe4c7b",
+          "installation": "replacement installation succeeded and exact installed-bundle query passed with existing pairing and autopair disabled",
+          "launch": "manual launch and subsequent force-quit/cold relaunch both remained open with all expected runtime-probe values",
+          "redactedObservation": "USB foreground and process activity observed; no fatal report or crash activity observed; no raw logs saved and no identifiers emitted"
+        },
+        "startupFixEvidence": "The pre-fix app aborted in AppDelegate.FinishedLaunching and lacked an AotProbe native-to-managed callback wrapper. MonoPInvokeCallback on the static qsort comparer generated the wrapper in both the Mono object and final executable; the rebuilt app then completed all probes and stayed open.",
+        "verificationBoundary": "rcodesign's executable verifier reports no problems but documents incomplete verification; the successful physical-device manual launch is the authoritative runtime result",
+        "scope": "private local evidence; certificate, private key, profile, device identifier, and signed app are not committed"
+      },
       "macHostAotPack": {
         "id": "Microsoft.NETCore.App.Runtime.AOT.osx-arm64.Cross.ios-arm64",
         "version": "10.0.12",
         "sha512Base64": "DZDjJn6gv9FrMMBzZljCK+XVsloXzQosWgFNiQ53jiwogf4LSxgVrcFFpH7rL8Okq+CveVZFxuMd+fYir/zOtw==",
         "sourceCommit": "95017c711e6afc1085133d440e42b4bd78155701",
-        "evidence": "Evaluated compiler path only; no verified execution."
+        "evidence": "Execution and native-link consumption were verified in the private HelloIos reference binlog before local capture deletion; its SHA-256 remains recorded under referenceMac."
       },
       "deviceRuntimePack": {
         "id": "Microsoft.NETCore.App.Runtime.Mono.ios-arm64",
@@ -99,49 +225,255 @@
         "sha512Base64": "Pbby0nRsy/2I7eK9UnGAgqjWxUqAVNbBMTiRaPTE0aW1WlHm8Qck2FpQE3eIatn0PrO5rUMLoWmJgIn12pi0og==",
         "sourceCommit": "95017c711e6afc1085133d440e42b4bd78155701"
       },
-      "requiredEvidence": [
-        "exact runtime source revision traced from the selected device runtime",
-        "executed AOT command, response files, target offsets, and LLVM mode",
-        "Linux host compiler configuration and target artifact inspection"
-      ]
+      "verifiedEvidence": [
+        "normal macios AOT task executes the selected compiler for AotProbe with LLVM enabled",
+        "HelloIos native link consumes both Mono and LLVM objects and produces an inspected app executable",
+        "AotProbe native object and final executable contain the required native-to-managed callback wrapper",
+        "manual physical-device launch displays the Hello UI with generic-aot, exception code 73, a positive process ID, and sorted checksum 1004",
+        "a subsequent incremental LLVM AOT/native-link rebuild was signed and installed as a replacement; manual launch and cold relaunch repeated the expected UI and probes without observed crash activity"
+      ],
+      "requiredEvidence": []
     },
     "appleSdk": {
-      "status": "user-supplied-only; legal-and-provenance-review-pending",
+      "status": "user-supplied XIP hash and SDK metadata verified; transactional SDK-only import passed; redistribution prohibited pending legal review",
+      "archiveName": "Xcode_27.xip",
+      "archiveSha256": "6a270c53a5a0c5e0ac78125342d44c3cfff2716ec390373cd5e30834d80a67c3",
       "xcodeVersion": "27.0",
       "xcodeBuild": "27A266a",
       "iosSdkVersion": "27.0",
+      "iosSdkBuild": "24A430",
+      "iosSdkBuildSource": "System/Library/CoreServices/SystemVersion.plist",
+      "platformVersion": "27.0",
+      "platformBuild": "24A430",
+      "sdkSettingsSha256": "ed5084e9e0f5c001b5e0674d31c87a54f87f3530a46bcba79c7bafb36584c989",
+      "sdkSystemVersionSha256": "de1e4fd6e8993468ce79316057ef9029a76298eb2c98ac344caf1fb106ad0864",
+      "importEvidence": {
+        "archiveMemberCount": 10428,
+        "archiveLogicalBytes": 216203047,
+        "materializedRegularFiles": 8890,
+        "materializedSymlinks": 90,
+        "materializedBytes": 216200394,
+        "remainingNullCanaryFiles": 0,
+        "hardlinkSemantics": "pinned unxip 3.3.0: first regular device/inode member is authoritative; later members are hardlinks",
+        "fullArchiveDdiScan": "166799 XIP members scanned; no DDI .dmg, trust cache, or personalized build manifest present"
+      },
       "redistribution": "blocked-until-reviewed"
     },
     "omarchyAppleDev": {
-      "status": "unresolved",
+      "status": "source revision inspected; isolated Swift 6.4.0, xtool, pymobiledevice3, authentic SDK import, direct development signing, USB installation, and manual runtime observation verified",
+      "repository": "https://github.com/joshuaswarren/omarchy-apple-dev.git",
+      "revision": "172e28cff7b6d5adebfa49f93957d6a864378dfb",
+      "tree": "c658002d37a28f922e1568cf9959be579d9f6cfc",
+      "license": {
+        "spdx": "MIT",
+        "sha256": "f13d4bd266e12504f3af553ee1f5617abf23106de0f3e9657596fd80a21c8fee"
+      },
+      "reviewedEntrypoints": {
+        "installToolchainSha256": "f32daeb4017d2880b9394600e2d99af57dec3834949b8eaa919caaec6c85eb99",
+        "deviceRunSha256": "f127d22a21648d5f09e776c7cd66a696e6d991dd80a3cc6808603a54dd4f045a"
+      },
+      "selection": "Full Xcode mode is selected because the no-Xcode sysroot implements only a framework subset and is insufficient evidence for the macios native-link gate.",
+      "installPolicy": "Do not execute install-toolchain.sh wholesale. Its package, home-directory, Swift-SDK, and unpinned-Python mutations must be replaced by project-owned pinned staging steps.",
+      "components": {
+        "swift": {
+          "status": "verified in a project-owned Linux x86-64 stage",
+          "version": "6.4.0",
+          "source": "https://download.swift.org/swift-6.4.0-release/ubi10/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE-ubi10.tar.gz",
+          "sha256": "50863678e3bafd91fcbc94c0bb76610bab37c1ee01e335fc7d8616904e03e19a",
+          "aurRecipeCommit": "76ec647c95acf2d46b6f0b235660084d0bd69eb2",
+          "aurRecipeTree": "f0ffc75ef57db11414df22d4271014b0229fb4d8",
+          "aurPackageVersion": "6.4.0-2",
+          "license": "Apache-2.0 with Runtime Library Exception",
+          "driftGuard": "The current AUR package is 6.4.1-1; it must not replace the selected 6.4.0 toolchain matched to Xcode 27.0.",
+          "hostCompatibility": {
+            "strategy": "Apply the pinned swift-bin 6.4.0-2 ncurses dependency rewrites inside a user-local stage and place the legacy libxml2 ABI in the toolchain's private runtime paths.",
+            "patchelf": {
+              "version": "0.19.2-1",
+              "source": "https://archive.archlinux.org/packages/p/patchelf/patchelf-0.19.2-1-x86_64.pkg.tar.zst",
+              "sha256": "3d4904a9d634de14b7dbacdfc521bf07bb5f20033707f5ff965416b9c17edc3b",
+              "signatureSha256": "8ecf8549588134603d8aac75ddf1ab4d9d961b9abff2db3fd5b81d595d9fbc9b",
+              "signingKey": "54C1FD273361EA514A237793F296BDE50368C6CE",
+              "license": "GPL-3.0-or-later"
+            },
+            "libxml2Legacy": {
+              "version": "2.13.9-2",
+              "source": "https://archive.archlinux.org/packages/l/libxml2-legacy/libxml2-legacy-2.13.9-2-x86_64.pkg.tar.zst",
+              "sha256": "aac28a52e81422935e3bfa44044030640c5d525ad8f65a9672a3ab7139974652",
+              "signatureSha256": "17ee7b04602a2d5b24f76332f8e146a55a54317a25f11bc17e88a36bdc6d64db",
+              "signingKey": "ADC8A1FCC15E01D45310419E94657AB20F2A092B",
+              "license": "MIT"
+            },
+            "systemNcurses": "6.6-2",
+            "localEvidence": "Swift and swiftc report 6.4, bundled Clang reports 21.0.0, and a release SwiftPM executable builds and runs with no LD_LIBRARY_PATH."
+          },
+          "stagedOutputs": {
+            "swiftSha256": "e1a3eb27b94273a1ec6397a51bb72f83c2e522b8bf81fefb748e4bf5ce3f2b74",
+            "swiftFrontendSha256": "eb09157a34c8c030abff718d06b0a4b721b70dc4da910bbaaa4c2c0b5299d446",
+            "clangSha256": "3753e74f2ae853e3455fcf81877a0e1fd8906cd557e74aecf2b63108d3c097c3",
+            "privateLibxml2Sha256": "7e05bdfecc5871ebb5628e501e94e7ea51af592dc8f285decb679177c45dda7f"
+          }
+        },
+        "xtool": {
+          "status": "verified in a project-owned Linux x86-64 stage",
+          "repository": "https://github.com/joshuaswarren/xtool.git",
+          "baseVersion": "1.20.1",
+          "baseTagCommit": "916cdffba86c7661e450a98eb76bfad5f824a4d6",
+          "revision": "f0a1f90efdbb0dc023e276ff529da92618da7a87",
+          "tree": "b9ad5b46fcd0c89951413bee95fa94078accf10f",
+          "upstreamPackageResolvedSha256": "43e1c442dbb52cb3117837c2da4f115266d5f2f2834fee8bffa3112519c85d7c",
+          "completePackageResolvedLock": "eng/toolchain/xtool-Package.resolved.lock",
+          "completePackageResolvedSha256": "978f904cce959c45792fa57baafb4f6f8cbbdda95fbb2d3feb9e25c43b29e89e",
+          "resolvedSwiftPackages": 55,
+          "resolutionCorrection": "Swift 6.4 resolves OpenCombine 0.14.0 transitively; it is absent from the upstream 54-pin file and is included in the enforced project lock.",
+          "xadi": {
+            "revision": "2aad968e4806b8571f6f2bed22ecec00b0322f95",
+            "artifactSha256": "2fc1aeb058f6067d23e2f2217a2ea0ec843057e1d82c13db37e30b8219d8d469"
+          },
+          "stagedOutputs": {
+            "xtoolSha256": "b67215c7b4145faf8851939d31d7a98085959d7c0ea9cec7c1b461695f006e18",
+            "libXADISha256": "eb68bd3dad62f68eac166aad7dc4e8c931013f42a529a8f5d4c520e671375350",
+            "normalization": "The varying GNU build-ID note is removed after confirming all loadable/code/data/Swift metadata sections are byte-identical; two independent normalized builds produced the recorded hashes.",
+            "localEvidence": "The staged executable reports the exact revision, resolves its private Swift runtime through $ORIGIN, and executes --help with LD_LIBRARY_PATH unset. Reuse verifies recorded per-stage output hashes."
+          },
+          "license": "MIT",
+          "licenseSha256": "04cf87035e25606762ba596ec29ecac450a281f3d210a8042c91f49645c2e695",
+          "transitiveLicenseAudit": "pending"
+        },
+        "openAppleMacros": {
+          "repository": "https://github.com/joshuaswarren/OpenAppleMacros.git",
+          "revision": "cb003a1763b08947dd37376ed8240cbfb4745c32",
+          "tree": "771f94e97d8098ec53d5ac08b978de3e7a76b863",
+          "packageResolvedSha256": "6e96c4ff18b70af6b4f7d5da4f732a0f336e05aeb203e39fc03aa0d940d5b380",
+          "license": "MIT; vendored FoundationMacros are Apache-2.0 with Runtime Library Exception",
+          "licenseSha256": "0cb44d89d3783a912b865a7fd38adaf581d32767d1416c912479dbe2d1c3f1a7"
+        },
+        "darwinTools": {
+          "packageResolvedSha256": "0f674b23de1e50959ce336402c87785036abd98a00467aa6a2ce5094c6d7cf0c",
+          "dependencies": [
+            {
+              "repository": "https://github.com/joshuaswarren/AssetKit.git",
+              "revision": "09875ccce71e15244aa4910546e1f6afb6ef71d9",
+              "tree": "dd615b0123d05eaae43549005631385d71faecf2",
+              "license": "MIT; vendored CLZFSE is BSD-3-Clause"
+            },
+            {
+              "repository": "https://github.com/rarestype/h.git",
+              "revision": "aa3626829160917d4378330617971977cbd78f5b",
+              "tree": "a85d450d88999c89ec0dc9b3cae7a9cabf37b70b",
+              "license": "Apache-2.0"
+            },
+            {
+              "repository": "https://github.com/tayloraswift/swift-png.git",
+              "revision": "8a0bcd4df5e4b307c804937776a56dd6ecdf6396",
+              "tree": "e2757b143b351b0f68cf66791493181221b6608a",
+              "license": "Apache-2.0"
+            }
+          ]
+        },
+        "rcodesign": {
+          "version": "0.29.0",
+          "source": "https://github.com/indygreg/apple-platform-rs/releases/tag/apple-codesign%2F0.29.0",
+          "releaseCommit": "2312b1e5bd77322c019613e0ca624e222c6c6e08",
+          "linuxX64TarSha256": "dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002",
+          "linuxX64ExecutableSha256": "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2",
+          "copyingSha256": "856867e127c2349ea11dff0930a488e7a1e386d975bcb9088a3c6e2bf1b3d990",
+          "cargoLockSha256": "ee4a17538d0500374329dd111f31aff5837a75dfc1e7b1fb1b429d3466b49799",
+          "licenseAudit": "335-component release inventory reviewed; scanner gap for ring 0.17.8 resolved against crates.io checksum c17fa4cb658e3583423e915b9f3acc01cceaee1860e33d59ebae66adc3a2dc0d and its ISC/BoringSSL-derived notice",
+          "classification": "build-only; retain COPYING; no redistribution claim",
+          "localEvidence": "Transactional project-owned setup verifies the archive layout, all staged hashes, static-pie x86-64 ELF format, exact version output, reuse, and fail-closed corrupt-cache/unowned-destination behavior.",
+          "signingWorkflowEvidence": "A disposable self-signed fixture verifies P12 compatibility and wildcard entitlement concretization. A private Apple development identity/profile then passed key/certificate, expiry, team, bundle, certificate-membership, and device-authorization checks; the copy-only inside-out signature has CodeResources and LC_CODE_SIGNATURE and passed rcodesign's documented partial executable verifier."
+        },
+        "ipsw": {
+          "version": "3.1.731",
+          "source": "https://github.com/blacktop/ipsw/releases/tag/v3.1.731",
+          "linuxX64TarSha256": "98e5b127641be3511242a5ba9c5872ef34010e5171318b616e5aa80a607749ff",
+          "scope": "LLDB/device-symbol support; not required for the first build/install/launch gate",
+          "licenseAudit": "pending"
+        },
+        "pymobiledevice3": {
+          "version": "11.26.0",
+          "source": "https://pypi.org/project/pymobiledevice3/11.26.0/",
+          "wheelSha256": "b1ed7fb66211b586618608980201b23ea40d8d02ead77764a0b97a9307341d21",
+          "sdistSha256": "6d41f75472becf84f23661d4d9e15561ec45bbfc3906faa100f0a48ee43feb08",
+          "license": "GPL-3.0-or-later",
+          "requirementsLock": "eng/toolchain/pymobiledevice3-requirements.lock",
+          "requirementsLockSha256": "b76b9db5d691b7ae6d6e377884e7ff070f2545b5749d724fb24dc7d60f3d90d5",
+          "resolvedPythonPackages": 101,
+          "localEvidence": "A hash-enforced isolated Python 3.14.8 installation imports pymobiledevice3 and cryptography, reports pymobiledevice3 11.26.0, discovers one USB device, and validates one existing lockdown pairing through the redacted probe.",
+          "installerDrift": "The upstream installer uses an unbounded pip install and currently resolves 11.40.0; that path is rejected."
+        }
+      },
+      "hostObservation": {
+        "capturedAtUtc": "2026-10-20T00:00:00Z",
+        "distribution": "EndeavourOS (Arch-like)",
+        "architecture": "x86_64",
+        "present": [
+          "clang 23.1.3",
+          "LLD 23.1.3",
+          "libimobiledevice 1.4.0",
+          "libplist 2.7.0",
+          "libimobiledevice-glue 1.3.2",
+          "libtatsu 1.0.5",
+          "usbmuxd 1.1.1-4 active through udev activation",
+          "zip 3.0-14",
+          "Python 3.14.8",
+          "project-owned Swift 6.4.0 stage with bundled Clang 21.0.0",
+          "project-owned xtool f0a1f90 stage",
+          "project-owned pymobiledevice3 11.26.0 stage",
+          "project-owned rcodesign 0.29.0 stage",
+          "user-supplied Xcode 27.0 archive and imported iPhoneOS 27.0 SDK"
+        ],
+        "missing": [
+          "operator-approved personalized Developer Disk Image for automated CoreDevice launch"
+        ],
+        "device": "Apple USB vendor/product 05ac:12a8 is visible; usbmuxd is active; redacted probes report one USB device, one valid existing lockdown pairing, successful profile authorization, and successful clean/incremental replacement installation queries. Manual launch and cold relaunch displayed the expected UI and deterministic AOT probe values without observed crash activity; identifiers were not captured."
+      },
+      "scriptReview": {
+        "installerMutations": "May install pacman/AUR packages; write ~/.config/omarchy-apple-dev, ~/.cache/omarchy-apple-dev, ~/.cache/xtool, ~/.local/bin, ~/.local/lib/omarchy-apple-dev, ~/pymobile3-venv, and the active Swift SDK registry; modify SDK bundles and writable SwiftBuild xcspec files; and replace an unhealthy venv.",
+        "deviceMutations": "The default device-run path is not discovery-only: after lockdown and device listing it calls xtool dev run, which builds, signs, installs, and launches. Pairing is only suggested when lockdown info fails; it is not performed automatically.",
+        "discoveryProbe": "eng/toolchain/check-device-transport.py calls the pinned API directly, disables logging, emits only counts and exception class names, never auto-pairs, and uses an ephemeral pairing cache for optional lockdown validation. eng/toolchain/check-xtool-devices.py verifies the staged executable, captures xtool's name/UDID-bearing output only in memory, and emits only counts and status.",
+        "credentialLocations": "xtool authentication is under ~/.local/share/xtool and pairing material is under ~/.pymobiledevice3 and /var/lib/lockdown; none may enter source control or receipts.",
+        "directWorkflow": "eng/toolchain/sign-ios-app.py reads mode-600 P12/profile configuration, signs a copy, and redacts private values. eng/toolchain/device-ios-app.py requires explicit install/launch flags, selects exactly one USB device, uses autopair=False, suppresses library logs, and does not emit identifiers."
+      },
+      "verifiedEvidence": [
+        "built and hashed the selected Swift 6.4.0 and xtool revisions in isolated project-owned prefixes",
+        "enforced all 55 Swift package revisions and the XADI binary artifact checksum without modifying the source cache",
+        "verified relocatable xtool execution with LD_LIBRARY_PATH unset and byte-identical normalized rebuilds",
+        "executed identifier-redacted pymobiledevice3 and xtool discovery; both report one USB device and lockdown validates one existing pairing",
+        "imported the hash-verified Xcode 27 SDK without patching Apple metadata and completed the unsigned HelloIos native-link gate",
+        "staged the hash-verified rcodesign 0.29.0 static Linux x86-64 release transactionally and resolved its release license-inventory exception",
+        "validated a private Apple development identity/profile/device match, signed a copied HelloIos bundle, and installed/queried the expected bundle over USB without auto-pairing or identifier output",
+        "manually launched the clean-build and incremental-build app bundles and observed stable UI with the expected generic, exception, P/Invoke, and native-callback probe results",
+        "force-quit and cold-relaunched the incremental bundle under a redacted read-only syslog observation with no fatal report or crash activity"
+      ],
       "requiredEvidence": [
-        "immutable compatible commit",
-        "component-level licenses and provenance",
-        "observed command contracts"
+        "complete transitive license review for xtool, ipsw, and Python dependencies",
+        "supply an operator-approved personalized Developer Disk Image only for automated CoreDevice launch"
       ]
     }
   },
   "referenceMac": {
-    "status": "pre-AOT evaluation trace; provisioning blocked",
+    "status": "clean HelloIos reference build completed through Mono AOT and native link; device execution unverified",
     "macos": "26.7.1 (25G241)",
     "architecture": "arm64",
-    "reportSha256": "ac3b139e1f3fd0706e3781867da562b0df1a0ccca698c13c52bf6114200c802d",
-    "binlogSha256": "0c7db97cf77264b0465825a63c4c5e58cd4bcb086f6bd3c5c73d922563dbcdb7",
+    "helloIosReportSha256": "4160ba166069a376e2cd3895a588c3c8b05074618d7e8212baccac018ce0448b",
+    "helloIosBinlogSha256": "4ed615ddd0b5a5dada1971386c1b6c18543cfbc62dbc2ab6338e8603b4019801",
+    "aotProbeReportSha256": "52721c13b95d8da7f3cb30dd8460a945a17729363499be5e21c67a4e20459cfb",
+    "aotProbeBinlogSha256": "1ac0924bf20e137aa8176dff8c188b17da2da5a8a26e92a76493b6d18bc682ec",
+    "packDirectoriesSha256": "cc9df5b31b6b01f45fd3aaabb431a2f3027d1a7e451da8b9bef0917df2622f4b",
+    "sdkManifestFilesSha256": "40ae1f2b80548af31272c31e4844602d79ae875abd8a8dcde75d02db60cb383f",
     "observedAotCompilerPath": "Microsoft.NETCore.App.Runtime.AOT.osx-arm64.Cross.ios-arm64/10.0.12/tools/mono-aot-cross",
     "limitations": [
-      "The capture used ambient dotnet and recorded an executable path as dotnet_root.",
-      "The build failed at provisioning-profile discovery before verified AOT execution.",
-      "Raw source artifacts are local-only and ignored."
+      "The reference is Mac-hosted and does not establish Linux host compatibility.",
+      "The private reports, inventories, and binlogs were checksum-verified and removed from the repository worktree after their hashes were recorded here.",
+      "Device installation, launch, and probe execution are unverified."
     ]
   },
   "acceptance": {
     "requiredBeforeAcceptedLock": [
-      "corrected clean reference-Mac capture through executed AOT",
-      "complete package hashes and signatures",
+      "complete package hashes, signatures, and transitive license review",
       "effective Linux workload graph",
-      "runtime and compiler provenance",
-      "Apple SDK build metadata",
-      "backend revision and host dependency inventory"
+      "transactional workload lifecycle and rollback"
     ]
   }
 }

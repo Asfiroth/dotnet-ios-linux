@@ -1,0 +1,20 @@
+<Project>
+  <!-- Imported through CustomBeforeDirectoryBuildProps so output paths are set
+       before Microsoft.Common.props consumes MSBuildProjectExtensionsPath. -->
+  <PropertyGroup Condition="'$(DotnetIosLinuxArtifactsRoot)' != ''">
+    <_DotnetIosLinuxIntermediateRoot>$([MSBuild]::NormalizeDirectory('$(DotnetIosLinuxArtifactsRoot)', 'obj', '$(MSBuildProjectName)'))</_DotnetIosLinuxIntermediateRoot>
+    <_DotnetIosLinuxOutputRoot>$([MSBuild]::NormalizeDirectory('$(DotnetIosLinuxArtifactsRoot)', 'bin', '$(MSBuildProjectName)'))</_DotnetIosLinuxOutputRoot>
+    <!-- macios models app-bundle output as project-relative in several targets. -->
+    <BaseIntermediateOutputPath>$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetRelativePath('$(MSBuildProjectDirectory)', '$(_DotnetIosLinuxIntermediateRoot)'))))</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+    <BaseOutputPath>$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetRelativePath('$(MSBuildProjectDirectory)', '$(_DotnetIosLinuxOutputRoot)'))))</BaseOutputPath>
+    <!-- Relocating BaseIntermediateOutputPath stops the SDK from automatically
+         excluding the conventional project-local obj directory. Keep stale or
+         unrelated generated sources there out of default item globs. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)/obj/**;$(MSBuildProjectDirectory)/bin/**</DefaultItemExcludes>
+    <CustomAfterMicrosoftCommonTargets Condition="'$(CustomAfterMicrosoftCommonTargets)' == ''">$(MSBuildThisFileDirectory)DotnetIosLinux.Integration.targets</CustomAfterMicrosoftCommonTargets>
+  </PropertyGroup>
+  <Import Project="$(MSBuildThisFileDirectory)..\packs\DotnetIosLinux.Sdk\Sdk\Sdk.props" />
+  <Import Project="$(DotnetIosLinuxAotPack)\Sdk\Sdk.props"
+          Condition="'$(DotnetIosLinuxAotPack)' != '' And Exists('$(DotnetIosLinuxAotPack)\Sdk\Sdk.props')" />
+</Project>

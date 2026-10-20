@@ -1,7 +1,7 @@
 # dotnet-ios-linux project specification
 
-Status: proposed; implementation and feasibility validation pending.  
-Date: 2026-10-17.  
+Status: experimental M2–M9 positive path; minimal UIKit device MVP passed.
+Date: 2026-10-17; last updated 2026-10-20.
 Primary host: EndeavourOS/Arch Linux x86_64.  
 Decision basis: the final decisions in “Linux Mac Development Setup,” conversation `6a68da62-2fbc-83eb-ad21-0f2dd79c7ce6`.
 
@@ -47,7 +47,7 @@ Earlier proposals for workload ID `ios-linux` and a separate `~/.dotnet-ios-linu
 | Outputs | Unsigned `.app`, then development-signed `.app`; `.ipa` when needed by deployment |
 | Build host independence | No remote Mac build service after SDK acquisition |
 
-The active candidate baseline was rebaselined on 2026-10-17 to the supplied Mac reference: .NET SDK `10.0.402`, workload set `10.0.401.1`, macios package version `27.0.10722`, and Xcode/iPhoneOS SDK family `27.0`. These pins are observed on the reference Mac and their released artifacts are available, but remain **unverified for the Linux host**. M0 must confirm the complete package graph, host-tool behavior, actual AOT invocation, and runtime provenance before declaring a compatible baseline. Preserve the superseded `10.0.302` / `26.5.10301` evidence as historical receipts; do not mix the two graphs.
+The active candidate baseline was rebaselined on 2026-10-17 to the supplied Mac reference: .NET SDK `10.0.402`, workload set `10.0.401.1`, macios package version `27.0.10722`, Xcode `27.0 (27A266a)`, and iPhoneOS SDK `27.0 (24A430)`. Linux now verifies SDK discovery, matched LLVM AOT execution, native compilation/linking, unsigned bundling, direct development signing, USB installation, clean and incremental manual launches, cold relaunch, visible UI, and deterministic runtime probes for the minimal UIKit application. The complete package graph, supported workload lifecycle, automated launch, negative deployment paths, and consumer tooling remain unverified. Preserve the superseded `10.0.302` / `26.5.10301` evidence as historical receipts; do not mix the two graphs.
 
 `toolchain.lock.json` will record the SDK version and hash, SDK feature band, workload installation mode/set, manifest IDs and versions, every package ID/version/hash, runtime source commit, compiler configuration, LLVM revision, Apple SDK version/build/hash, Xcode metadata, omarchy revision, downstream patches, signing/deployment tool versions, uno-check version, Rider version, and host dependencies. The runtime commit must be traced to the selected device runtime, not inferred solely from the SDK version.
 
@@ -221,41 +221,37 @@ Do not hand-edit workload metadata to fabricate installation success. Coordinate
 
 Updates are explicit distribution upgrades. Test them in a temporary home before changing the canonical installation. Check unknown SDK/manifest/pack combinations before build and fail with the incompatible component identified. Keep diagnostic logs local by default and redact signing secrets and device identifiers before sharing.
 
-Proposed repository structure; only README.md and SPEC.md exist at specification delivery:
+Repository structure:
 
 ```text
 dotnet-ios-linux/
+├── .editorconfig
+├── .gitignore
+├── LICENSE
 ├── README.md
-├── SPEC.md
 ├── toolchain.lock.json
-├── global.json
-├── installer/                 # setup, rollback, uninstall, environment generation
-├── manifests/
-│   ├── dotnet/<baseline>/     # generated workload JSON and targets
-│   └── uno/                   # custom stock uno-check manifest
-├── packs/                     # package definitions, not vendored official binaries
-│   ├── DotnetIosLinux.Sdk/
-│   ├── DotnetIosLinux.Toolchain/
-│   └── DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/
-├── runtime/                   # pinned Mono source acquisition and build recipe
-├── toolchain/                 # SDK import and synthetic Xcode construction
-├── shims/                     # compatibility command entry points
-├── msbuild/                   # automatically imported Linux integration
-├── patches/                   # minimal versioned upstream patches
-├── scripts/                   # doctor, signing/deployment adapters, evidence capture
+├── docs/                      # specification, status, evidence, and governance
+├── src/
+│   ├── msbuild/               # automatically imported Linux integration
+│   ├── packs/                 # package templates without generated binaries
+│   └── shims/                 # compatibility command entry points
+├── eng/
+│   ├── runtime/               # pinned Mono/LLVM acquisition and build recipe
+│   │   └── patches/           # minimal versioned upstream runtime patches
+│   ├── toolchain/             # SDK import, signing, deployment, dependency setup
+│   └── evidence/              # inventory, receipt, and repository validation
 ├── tests/
 │   ├── contracts/             # tool and manifest fixtures
-│   ├── lifecycle/             # install/repair/rollback/coexistence
+│   ├── integration/           # private SDK/AOT/native-link gates
 │   ├── HelloIos/              # minimal UIKit app
-│   ├── AotProbe/              # generics, exceptions, native interop
-│   ├── ResourcesIos/          # supported asset/storyboard coverage
-│   └── HelloUno/              # later integration acceptance
-├── docs/                      # decisions, compatibility matrix, setup/troubleshooting
-├── receipts/                  # sanitized milestone evidence
-└── artifacts/                 # ignored downloads/build outputs
+│   └── AotProbe/              # generics, exceptions, native interop
+└── artifacts/                 # ignored downloads/build outputs when explicitly used
 ```
 
-Select a project license before code distribution and retain third-party notices. SDKs, credentials, local configuration, private binlogs, extracted runtimes, and generated binaries are excluded from source control. Do not choose a license for third-party components on their authors' behalf.
+Original project content is licensed under the MIT License. Retain third-party
+notices and do not apply the project license to external components on their
+authors' behalf. SDKs, credentials, local configuration, private binlogs,
+extracted runtimes, and generated binaries are excluded from source control.
 
 ## 6. Implementation phases and milestones M0–M10
 
@@ -369,4 +365,4 @@ The conversation establishes product intent and candidate versions. It does not 
 - [macios releases](https://github.com/dotnet/macios/releases): resolve the requested toolchain against actual release/package evidence before locking it.
 - [Uno environment checking](https://platform.uno/docs/articles/uno-check.html) and [manifest documentation](https://platform.uno/docs/articles/external/uno.check/manifests/README.html): custom-manifest integration entry points.
 
-No compiler build, SDK installation, signing, device test, or Rider test was performed while authoring this specification.
+The original planning baseline predated implementation. Current repository evidence now covers the pinned compiler build, project-owned SDK import, synthetic-Xcode discovery, the private unsigned `HelloIos` M2–M6 gate, development signing, clean and incremental replacement installation, repeated manual launch/runtime probes, and cold relaunch. Negative deployment gates, automated CoreDevice launch, Rider, Uno, and production lifecycle tests remain outstanding.

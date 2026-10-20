@@ -1,0 +1,5 @@
+<Project>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'ios-arm64'">
+    <MonoAotCrossCompiler Include="$(MSBuildThisFileDirectory)..\tools\mono-aot-cross" RuntimeIdentifier="ios-arm64" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,19 @@
+<Project>
+  <!-- macios 27 uses MSBuild::MakeRelative for these values. That function
+       returns an absolute path when project and artifact roots diverge at /,
+       and the publish pipeline subsequently treats it as relative. -->
+  <Target Name="_DotnetIosLinuxNormalizePublishPaths"
+          AfterTargets="_ComputeVariables"
+          Condition="$([MSBuild]::IsOSPlatform('linux')) And '$(DotnetIosLinuxArtifactsRoot)' != ''">
+    <PropertyGroup>
+      <_DotnetIosLinuxAbsolutePublishDir>$([System.IO.Path]::GetFullPath('$(_AbsolutePublishDir)'))</_DotnetIosLinuxAbsolutePublishDir>
+      <_DotnetIosLinuxAbsoluteAppBundlePath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(_AppBundlePath)'))</_DotnetIosLinuxAbsoluteAppBundlePath>
+      <_RelativePublishDir>$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetRelativePath('$(MSBuildProjectDirectory)', '$(_DotnetIosLinuxAbsolutePublishDir)'))))</_RelativePublishDir>
+      <_RelativeAppBundlePath>$([System.IO.Path]::GetRelativePath('$(_DotnetIosLinuxAbsolutePublishDir)', '$(_DotnetIosLinuxAbsoluteAppBundlePath)'))</_RelativeAppBundlePath>
+      <_NativeExecutablePublishDir Condition="'$(SdkIsMobile)' == 'true'">$(_RelativeAppBundlePath)/</_NativeExecutablePublishDir>
+      <_NativeExecutablePublishDir Condition="'$(SdkIsDesktop)' == 'true'">$(_RelativeAppBundlePath)/Contents/MacOS/</_NativeExecutablePublishDir>
+      <_AppBundleFrameworksDir Condition="'$(SdkIsMobile)' == 'true'">$(_RelativeAppBundlePath)/Frameworks/</_AppBundleFrameworksDir>
+      <_AppBundleFrameworksDir Condition="'$(SdkIsDesktop)' == 'true'">$(_RelativeAppBundlePath)/Contents/Frameworks/</_AppBundleFrameworksDir>
+    </PropertyGroup>
+  </Target>
+</Project>
