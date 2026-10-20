@@ -4,29 +4,20 @@ set -Eeuo pipefail
 umask 077
 
 readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-readonly project_version="0.1.0-preview.1"
-readonly install_id="$project_version-sdk-10.0.402"
-readonly sdk_version="10.0.402"
-readonly sdk_sha512="1904a98dda2db34ba78ba3c4fb1b224455329af91c341d83547843c1839e112b04ae699ee92fa2449a8f62249196a938723078c0c60b9f65c88539d5687729c2"
-readonly sdk_url="https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.402/dotnet-sdk-10.0.402-linux-x64.tar.gz"
-readonly manifest_url="https://api.nuget.org/v3-flatcontainer/microsoft.net.sdk.ios.manifest-10.0.100/27.0.10722/microsoft.net.sdk.ios.manifest-10.0.100.27.0.10722.nupkg"
-readonly manifest_sha512_base64="E67WwID69ZQmMd0fs8OFeExzyso/7rJk7QfIkK+fs+cEQj6e2s/hUA/iPtP36Li08YZVp8L7iY6Uk+zmfdU5Ww=="
-readonly manifest_sha512="13aed6c080faf5942631dd1fb3c385784c73caca3feeb264ed07c890af9fb3e704423e9edacfe1500fe23ed3f7e8b8b4f18655a7c2fb898e9493ece67dd5395b"
-readonly workload_set_url="https://api.nuget.org/v3-flatcontainer/microsoft.net.workloads.10.0.400/10.401.1/microsoft.net.workloads.10.0.400.10.401.1.nupkg"
-readonly workload_set_sha512="ad2c4e4370d3cc8250f9d2cbc01d40491e4ddadb29a797814dc193a259b7d92ae827c27b2bbea4f11ec5c9f49a19feda78461623c4baadb95de87d285f67250c"
-readonly xcode_sha256="6a270c53a5a0c5e0ac78125342d44c3cfff2716ec390373cd5e30834d80a67c3"
-readonly runtime_commit="4271d88e0aebf3d04f188f1334c2220d80555ef6"
+readonly lock_path="$script_dir/toolchain.lock.json"
+readonly context_resolver="$script_dir/eng/install/resolve-install-context.py"
 . "$script_dir/eng/install/download-verified.sh"
 
 usage() {
     cat <<'EOF'
 Usage:
-  ./install.sh install --xcode-archive /path/to/Xcode_27.xip [options]
+  ./install.sh install --xcode-archive /path/to/Xcode.xip [options]
   ./install.sh doctor
   ./install.sh uninstall [--yes] [--purge-cache]
 
 Install options:
-  --xcode-archive PATH  Required user-supplied authentic Xcode 27 archive.
+  --xcode-archive PATH  Required user-supplied Xcode archive compatible with
+                        the selected iOS workload.
   --aot-pack PATH       Reuse a locally built LLVM AOT pack layout.
   --jobs COUNT          Runtime compiler build parallelism.
   --offline             Forbid external downloads; require complete caches.
@@ -108,11 +99,6 @@ readonly receipt="$data_root/receipts/install.json"
 readonly sdk_receipt="$data_root/receipts/dotnet-sdk.json"
 readonly workload_transaction="$data_root/receipts/workload-transaction"
 readonly control_root="$data_root/control"
-readonly feed="$data_root/feeds/$install_id"
-readonly toolchain="$data_root/toolchains/$install_id"
-readonly sdk_archive="$cache_root/downloads/dotnet-sdk-10.0.402-linux-x64.tar.gz"
-readonly manifest_archive="$cache_root/downloads/microsoft.net.sdk.ios.manifest-10.0.100.27.0.10722.nupkg"
-readonly workload_set_archive="$cache_root/downloads/microsoft.net.workloads.10.0.400.10.401.1.nupkg"
 
 [[ ! -L "$data_root" ]] || { printf 'durable data root must not be a symlink: %s\n' "$data_root" >&2; exit 1; }
 [[ ! -L "$cache_root" ]] || { printf 'cache root must not be a symlink: %s\n' "$cache_root" >&2; exit 1; }
@@ -126,26 +112,147 @@ if sys.version_info < (3, 10):
     raise SystemExit("Python 3.10 or newer is required to run the bootstrap")
 PY
 
-lock_sha256="$(sha256sum -b "$script_dir/toolchain.lock.json" | cut -d' ' -f1)"
-python3 - "$script_dir/toolchain.lock.json" <<'PY'
+declare -A lock_values=()
+declare -A install_context=()
+declare -a resolved_pairs=()
+read_resolved_pairs() {
+    local destination_name="$1" output key value
+    shift
+    local -n destination="$destination_name"
+    output="$(mktemp "${TMPDIR:-/tmp}/dotnet-ios-linux-context.XXXXXX")"
+    if ! "$context_resolver" --format null "$@" > "$output"; then
+        rm -f -- "$output"
+        return 1
+    fi
+    mapfile -d '' -t resolved_pairs < "$output"
+    rm -f -- "$output"
+    ((${#resolved_pairs[@]} > 0 && ${#resolved_pairs[@]} % 2 == 0)) || {
+        printf 'install context resolver returned an invalid response\n' >&2
+        return 1
+    }
+    destination=()
+    while ((${#resolved_pairs[@]})); do
+        key="${resolved_pairs[0]}"
+        value="${resolved_pairs[1]}"
+        destination["$key"]="$value"
+        resolved_pairs=("${resolved_pairs[@]:2}")
+    done
+}
+
+read_resolved_pairs lock_values lock --lock "$lock_path"
+readonly project_version="${lock_values[project_version]}"
+readonly sdk_fallback_version="${lock_values[sdk_fallback_version]}"
+readonly sdk_feature_band="${lock_values[sdk_feature_band]}"
+readonly sdk_url="${lock_values[sdk_url]}"
+readonly sdk_sha512="${lock_values[sdk_sha512]}"
+readonly workload_fallback_version="${lock_values[workload_fallback_version]}"
+readonly workload_set_url="${lock_values[workload_package_url]}"
+readonly workload_set_sha512="${lock_values[workload_package_sha512]}"
+readonly manifest_url="${lock_values[manifest_url]}"
+readonly manifest_sha512_base64="${lock_values[manifest_sha512_base64]}"
+readonly manifest_sha512="${lock_values[manifest_sha512]}"
+readonly manifest_version="${lock_values[manifest_version]}"
+readonly manifest_suffix="${lock_values[manifest_suffix]}"
+readonly runtime_commit="${lock_values[runtime_commit]}"
+readonly llvm_version="${lock_values[llvm_version]}"
+readonly llvm_major="${lock_values[llvm_major]}"
+readonly supported_xcode_version="${lock_values[supported_xcode_version]}"
+readonly supported_ios_sdk_version="${lock_values[supported_ios_sdk_version]}"
+readonly locked_xcode_sha256="${lock_values[locked_xcode_sha256]}"
+readonly swift_version="${lock_values[swift_version]}"
+readonly xtool_revision_short="${lock_values[xtool_revision_short]}"
+readonly python_version="${lock_values[python_version]}"
+readonly pymobiledevice3_version="${lock_values[pymobiledevice3_version]}"
+readonly rcodesign_version="${lock_values[rcodesign_version]}"
+readonly sdk_archive="$cache_root/downloads/${lock_values[sdk_archive]}"
+readonly manifest_archive="$cache_root/downloads/${lock_values[manifest_archive]}"
+readonly workload_set_archive="$cache_root/downloads/${lock_values[workload_package_archive]}"
+lock_sha256="$(sha256sum -b "$lock_path" | cut -d' ' -f1)"
+
+install_id=""
+sdk_version=""
+sdk_source=""
+workload_set_version=""
+workload_source=""
+feed=""
+toolchain=""
+xcode_archive_sha256=""
+xcode_version=""
+xcode_build=""
+platform_version=""
+platform_build=""
+xcode_sdk_version=""
+xcode_sdk_build=""
+recommended_xcode_version=""
+
+set_install_paths() {
+    install_id="$project_version-sdk-$sdk_version"
+    feed="$data_root/feeds/$install_id"
+    toolchain="$data_root/toolchains/$install_id"
+}
+
+xcode_is_compatible() {
+    "$context_resolver" xcode-compatible --actual "$1" --recommended "$2" >/dev/null
+}
+
+resolve_new_install_context() {
+    read_resolved_pairs install_context sdk --root "$dotnet_root" \
+        --feature-band "$sdk_feature_band" --fallback "$sdk_fallback_version"
+    sdk_version="${install_context[sdk_version]}"
+    sdk_source="${install_context[sdk_source]}"
+    read_resolved_pairs install_context workload --root "$dotnet_root" \
+        --feature-band "$sdk_feature_band" --manifest-version "$manifest_version" \
+        --manifest-suffix "$manifest_suffix" --fallback "$workload_fallback_version"
+    workload_set_version="${install_context[workload_version]}"
+    workload_source="${install_context[workload_source]}"
+    set_install_paths
+}
+
+load_owned_context() {
+    local source="$1"
+    mapfile -d '' -t resolved_pairs < <(python3 - "$source" "$dotnet_root" <<'PY'
 import json, sys
 from pathlib import Path
-value=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-checks={
- "components.dotnetSdk.version":"10.0.402",
- "components.dotnetSdk.sha512":"1904a98dda2db34ba78ba3c4fb1b224455329af91c341d83547843c1839e112b04ae699ee92fa2449a8f62249196a938723078c0c60b9f65c88539d5687729c2",
- "components.workloadSet.cliVersion":"10.0.401.1",
- "components.iosManifest.version":"27.0.10722",
- "components.monoRuntime.sourceCommit":"4271d88e0aebf3d04f188f1334c2220d80555ef6",
- "components.appleSdk.archiveSha256":"6a270c53a5a0c5e0ac78125342d44c3cfff2716ec390373cd5e30834d80a67c3",
-}
-for path, expected in checks.items():
-    current=value
-    for part in path.split('.'):
-        current=current[part]
-    if current != expected:
-        raise SystemExit(f"toolchain lock mismatch at {path}: {current!r} != {expected!r}")
+path=Path(sys.argv[1])
+try: value=json.loads(path.read_text(encoding="utf-8"))
+except Exception as error: raise SystemExit(f"cannot read installation context {path}: {error}")
+if value.get("owner") != "dotnet-ios-linux" or value.get("dotnetRoot") != sys.argv[2]:
+    raise SystemExit("installation context has different ownership")
+required=("installId","sdkVersion","workloadSet")
+for key in required:
+    item=value.get(key)
+    if not isinstance(item,str) or not item or "\x00" in item:
+        raise SystemExit(f"installation context lacks {key}")
+for key in required:
+    sys.stdout.buffer.write(key.encode()+b"\0"+value[key].encode()+b"\0")
+xcode=value.get("xcode",{})
+for key in ("version","build","sdkVersion","sdkBuild"):
+    item=xcode.get(key)
+    if isinstance(item,str) and item:
+        sys.stdout.buffer.write(("xcode."+key).encode()+b"\0"+item.encode()+b"\0")
 PY
+)
+    ((${#resolved_pairs[@]} >= 6 && ${#resolved_pairs[@]} % 2 == 0)) || {
+        printf 'installation context returned an invalid response\n' >&2
+        return 1
+    }
+    install_context=()
+    while ((${#resolved_pairs[@]})); do
+        install_context["${resolved_pairs[0]}"]="${resolved_pairs[1]}"
+        resolved_pairs=("${resolved_pairs[@]:2}")
+    done
+    install_id="${install_context[installId]}"
+    sdk_version="${install_context[sdkVersion]}"
+    workload_set_version="${install_context[workloadSet]}"
+    sdk_source="receipt"
+    workload_source="receipt"
+    feed="$data_root/feeds/$install_id"
+    toolchain="$data_root/toolchains/$install_id"
+    xcode_version="${install_context[xcode.version]:-}"
+    xcode_build="${install_context[xcode.build]:-}"
+    xcode_sdk_version="${install_context[xcode.sdkVersion]:-}"
+    xcode_sdk_build="${install_context[xcode.sdkBuild]:-}"
+}
 
 read_marker_status() {
     python3 - "$marker" <<'PY'
@@ -209,12 +316,13 @@ activate_environment() {
     export DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
     export DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE=true
     export DEVELOPER_DIR="$data_root/Xcode.app/Contents/Developer"
-    export DOTNET_IOS_LINUX_CLANG="$toolchain/swift-6.4.0/usr/bin/clang"
-    export DOTNET_IOS_LINUX_CLANGXX="$toolchain/swift-6.4.0/usr/bin/clang++"
-    export PATH="$dotnet_root:$dotnet_root/tools:$data_root/bin:$toolchain/swift-6.4.0/usr/bin:$DEVELOPER_DIR/usr/bin:$PATH"
+    export DOTNET_IOS_LINUX_CLANG="$toolchain/swift-$swift_version/usr/bin/clang"
+    export DOTNET_IOS_LINUX_CLANGXX="$toolchain/swift-$swift_version/usr/bin/clang++"
+    export PATH="$dotnet_root:$dotnet_root/tools:$data_root/bin:$toolchain/swift-$swift_version/usr/bin:$DEVELOPER_DIR/usr/bin:$PATH"
 }
 
 doctor() {
+    local actual_sdk actual_workload actual_xcode actual_sdk_version swift_major_minor
     [[ -f "$marker" && -f "$receipt" ]] || { printf 'dotnet-ios-linux is not installed under %s\n' "$data_root" >&2; return 1; }
     [[ "$(read_marker_status)" == complete ]] || { printf 'installation is incomplete; rerun install\n' >&2; return 1; }
     python3 - "$receipt" "$lock_sha256" <<'PY'
@@ -226,30 +334,68 @@ if value.get("toolchainLockSha256") != sys.argv[2]:
 PY
     activate_environment
     "$script_dir/eng/install/durable-assets.py" verify --root "$data_root" --receipt "$receipt" >/dev/null
-    "$script_dir/eng/install/install-dotnet-sdk.py" verify --root "$dotnet_root" --receipt "$sdk_receipt" >/dev/null
+    if [[ -f "$sdk_receipt" ]]; then
+        "$script_dir/eng/install/install-dotnet-sdk.py" verify --root "$dotnet_root" \
+            --receipt "$sdk_receipt" --sdk-version "$sdk_version" >/dev/null
+    else
+        [[ -x "$dotnet_root/dotnet" && -d "$dotnet_root/sdk/$sdk_version" ]] || {
+            printf 'the selected pre-existing .NET SDK is no longer available: %s\n' "$sdk_version" >&2
+            return 1
+        }
+    fi
     "$script_dir/eng/install/workload-transaction.py" verify --root "$dotnet_root" --transaction "$workload_transaction" >/dev/null
     "$script_dir/eng/install/verify-workload-packages.py" --root "$dotnet_root" \
-        --feed "$feed" --lock "$script_dir/toolchain.lock.json" \
-        --dotnet "$dotnet_root/dotnet" >/dev/null
-    [[ "$($dotnet_root/dotnet --version)" == "$sdk_version" ]] || { printf 'selected .NET SDK is not %s\n' "$sdk_version" >&2; return 1; }
-    (cd "$control_root" && "$dotnet_root/dotnet" workload list) | grep -Eq '^ios[[:space:]]+27\.0\.10722/10\.0\.100' || {
+        --feed "$feed" --lock "$lock_path" --dotnet "$dotnet_root/dotnet" >/dev/null
+    actual_sdk="$(cd "$control_root" && "$dotnet_root/dotnet" --version)"
+    [[ "$actual_sdk" == "$sdk_version" ]] || {
+        printf 'selected .NET SDK is %s, expected installed SDK %s\n' "$actual_sdk" "$sdk_version" >&2
+        return 1
+    }
+    actual_workload="$(cd "$control_root" && "$dotnet_root/dotnet" workload --version)"
+    [[ "$actual_workload" == "$workload_set_version" ]] || {
+        printf 'selected workload set is %s, expected %s\n' "$actual_workload" "$workload_set_version" >&2
+        return 1
+    }
+    (cd "$control_root" && "$dotnet_root/dotnet" workload list) |
+        awk -v expected="$manifest_version/$manifest_suffix" \
+            '$1 == "ios" && $2 == expected { found=1 } END { exit !found }' || {
         printf 'the pinned ios workload is not installed\n' >&2; return 1;
     }
     "$dotnet_root/packs/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/$project_version/tools/mono-aot-cross" --version |
-        grep -Eq 'LLVM:[[:space:]]+yes\(1900\)' || { printf 'LLVM-enabled iOS AOT compiler validation failed\n' >&2; return 1; }
-    [[ "$("$toolchain/swift-6.4.0/usr/bin/swift" --version | head -n1)" == "Swift version 6.4 (swift-6.4-RELEASE)" ]]
-    env -u LD_LIBRARY_PATH "$toolchain/xtool-f0a1f90/xtool" --help >/dev/null
-    [[ "$("$toolchain/python-3.14.8/bin/python3" -c 'import platform; print(platform.python_version())')" == 3.14.8 ]]
-    [[ "$("$toolchain/pymobiledevice3-11.26.0/bin/pymobiledevice3" version)" == 11.26.0 ]]
-    [[ "$("$toolchain/rcodesign-0.29.0/rcodesign" --version)" == "apple-codesign 0.29.0" ]]
-    [[ "$("$DEVELOPER_DIR/usr/bin/xcrun" --sdk iphoneos --show-sdk-version)" == 27.0 ]]
-    [[ "$($DEVELOPER_DIR/usr/bin/xcodebuild -version | head -n1)" == "Xcode 27.0" ]]
+        grep -Eq "LLVM:[[:space:]]+yes\\($((llvm_major * 100))\\)" || {
+            printf 'LLVM-enabled iOS AOT compiler validation failed\n' >&2; return 1;
+        }
+    swift_major_minor="${swift_version%.*}"
+    "$toolchain/swift-$swift_version/usr/bin/swift" --version | head -n1 |
+        grep -Fq "Swift version $swift_major_minor" || {
+            printf 'Swift version validation failed\n' >&2; return 1;
+        }
+    env -u LD_LIBRARY_PATH "$toolchain/xtool-$xtool_revision_short/xtool" --help >/dev/null
+    [[ "$("$toolchain/python-$python_version/bin/python3" -c 'import platform; print(platform.python_version())')" == "$python_version" ]]
+    [[ "$("$toolchain/pymobiledevice3-$pymobiledevice3_version/bin/pymobiledevice3" version)" == "$pymobiledevice3_version" ]]
+    [[ "$("$toolchain/rcodesign-$rcodesign_version/rcodesign" --version)" == "apple-codesign $rcodesign_version" ]]
+    read_resolved_pairs install_context recommended-xcode --root "$dotnet_root" --lock "$lock_path"
+    recommended_xcode_version="${install_context[recommended_xcode_version]}"
+    xcode_is_compatible "$xcode_version" "$recommended_xcode_version" || {
+        printf 'installed Xcode %s is incompatible with iOS workload %s; expected Xcode %s\n' \
+            "$xcode_version" "$manifest_version" "$recommended_xcode_version" >&2
+        return 1
+    }
+    actual_sdk_version="$("$DEVELOPER_DIR/usr/bin/xcrun" --sdk iphoneos --show-sdk-version)"
+    [[ "$actual_sdk_version" == "$xcode_sdk_version" ]] || {
+        printf 'synthetic Xcode SDK is %s, expected %s\n' "$actual_sdk_version" "$xcode_sdk_version" >&2
+        return 1
+    }
+    actual_xcode="$("$DEVELOPER_DIR/usr/bin/xcodebuild" -version | head -n1)"
+    [[ "$actual_xcode" == "Xcode $xcode_version" ]] || {
+        printf 'synthetic Xcode reports %s, expected Xcode %s\n' "$actual_xcode" "$xcode_version" >&2
+        return 1
+    }
     printf 'doctor=passed\n'
     printf 'dotnet_root=%s\n' "$dotnet_root"
     printf 'data_root=%s\n' "$data_root"
     printf 'activation=%s\n' "$data_root/activate"
 }
-
 confirm() {
     local prompt="$1" answer
     [[ "$assume_yes" == false ]] || return 0
@@ -266,15 +412,20 @@ if [[ "$command_name" == install && "$dry_run" == true ]]; then
         [[ -d "$aot_pack" ]] || { printf 'AOT pack is not a directory: %s\n' "$aot_pack" >&2; exit 1; }
         aot_pack="$(realpath "$aot_pack")"
     fi
+    resolve_new_install_context
     cat <<EOF
 command=install
 dotnet_root=$dotnet_root
+dotnet_sdk=$sdk_version
+dotnet_sdk_source=$sdk_source
+workload_set=$workload_set_version
+workload_set_source=$workload_source
 data_root=$data_root
 cache_root=$cache_root
 xcode_archive=$(basename "$xcode_archive")
 offline=$offline
 runtime_source=$([[ -n "$aot_pack" ]] && printf reused-local-aot-pack || printf build-pinned-source-with-llvm)
-planned=SDK merge; Xcode SDK import; Swift/xtool/Python/pymobiledevice3/rcodesign staging; pinned workload install; activation
+planned=compatible SDK selection; Xcode/workload compatibility check; Xcode SDK import; host-tool staging; pinned iOS workload install; activation
 EOF
     exit 0
 fi
@@ -292,6 +443,8 @@ exec 9>"$cache_root/install.lock"
 flock -n 9 || { printf 'another dotnet-ios-linux lifecycle operation is active\n' >&2; exit 1; }
 
 if [[ "$command_name" == doctor ]]; then
+    [[ -f "$receipt" ]] || { printf 'dotnet-ios-linux is not installed under %s\n' "$data_root" >&2; exit 1; }
+    load_owned_context "$receipt"
     doctor
     exit 0
 fi
@@ -302,6 +455,8 @@ if [[ "$command_name" == uninstall ]]; then
         printf 'installation is incomplete; rerun install to recover it before uninstalling\n' >&2
         exit 1
     }
+    [[ -f "$receipt" ]] || { printf 'installation receipt is missing: %s\n' "$receipt" >&2; exit 1; }
+    load_owned_context "$receipt"
     confirm "Remove the owned iOS workload and durable dotnet-ios-linux data?"
     "$script_dir/eng/install/durable-assets.py" verify --root "$data_root" --receipt "$receipt"
     activate_environment
@@ -323,8 +478,10 @@ if [[ "$command_name" == uninstall ]]; then
     fi
     "$script_dir/eng/install/workload-transaction.py" restore \
         --root "$dotnet_root" --transaction "$workload_transaction"
-    "$script_dir/eng/install/install-dotnet-sdk.py" uninstall \
-        --root "$dotnet_root" --receipt "$sdk_receipt"
+    if [[ -f "$sdk_receipt" ]]; then
+        "$script_dir/eng/install/install-dotnet-sdk.py" uninstall \
+            --root "$dotnet_root" --receipt "$sdk_receipt" --sdk-version "$sdk_version"
+    fi
     "$script_dir/eng/install/durable-assets.py" uninstall --root "$data_root" --receipt "$receipt"
     rm -f -- "$marker" "$receipt"
     rmdir "$data_root/receipts" "$data_root" 2>/dev/null || true
@@ -338,6 +495,8 @@ if [[ "$command_name" == uninstall ]]; then
 fi
 
 if [[ -f "$marker" && "$(read_marker_status)" == complete ]]; then
+    [[ -f "$receipt" ]] || { printf 'installation receipt is missing: %s\n' "$receipt" >&2; exit 1; }
+    load_owned_context "$receipt"
     doctor
     exit 0
 fi
@@ -354,26 +513,48 @@ if [[ -e "$data_root" ]]; then
     [[ -f "$marker" ]] || { printf 'durable data root exists without an ownership marker: %s\n' "$data_root" >&2; exit 1; }
     status="$(read_marker_status)"
     if [[ "$status" == complete ]]; then
+        load_owned_context "$receipt"
         doctor
         exit 0
     fi
     [[ "$status" == installing ]] || { printf 'unknown installation state: %s\n' "$status" >&2; exit 1; }
+    if ! load_owned_context "$marker"; then
+        printf 'interrupted installation lacks a reusable context; resolving it again\n' >&2
+        resolve_new_install_context
+    fi
     printf 'Recovering an interrupted installation...\n'
     if [[ -d "$workload_transaction" ]]; then
         "$script_dir/eng/install/workload-transaction.py" restore --root "$dotnet_root" --transaction "$workload_transaction"
     fi
     if [[ -f "$sdk_receipt" ]]; then
-        "$script_dir/eng/install/install-dotnet-sdk.py" uninstall --root "$dotnet_root" --receipt "$sdk_receipt"
+        "$script_dir/eng/install/install-dotnet-sdk.py" uninstall --root "$dotnet_root" \
+            --receipt "$sdk_receipt" --sdk-version "$sdk_version"
     fi
     rm -rf -- "$data_root"
+else
+    resolve_new_install_context
 fi
 
 for tool in clang clang++ cmake curl file git ldd ln make ninja objcopy readelf strip tar; do need "$tool"; done
 [[ "$(uname -s) $(uname -m)" == "Linux x86_64" ]] || { printf 'only Linux x86_64 is supported\n' >&2; exit 1; }
 getconf GNU_LIBC_VERSION >/dev/null 2>&1 || { printf 'a glibc host is required; musl is not supported\n' >&2; exit 1; }
 confirm "Install the locked toolchain into $dotnet_root and $data_root?"
-printf '%s  %s\n' "$xcode_sha256" "$xcode_archive" | sha256sum --check --status || {
-    printf 'Xcode archive SHA-256 mismatch: %s\n' "$xcode_archive" >&2
+read_resolved_pairs install_context xcode --archive "$xcode_archive"
+xcode_archive_sha256="${install_context[xcode_archive_sha256]}"
+xcode_version="${install_context[xcode_version]}"
+xcode_build="${install_context[xcode_build]}"
+platform_version="${install_context[platform_version]}"
+platform_build="${install_context[platform_build]}"
+xcode_sdk_version="${install_context[xcode_sdk_version]}"
+xcode_sdk_build="${install_context[xcode_sdk_build]}"
+xcode_is_compatible "$xcode_version" "$supported_xcode_version" || {
+    printf 'Xcode %s is incompatible with iOS workload %s; expected Xcode %s\n' \
+        "$xcode_version" "$manifest_version" "$supported_xcode_version" >&2
+    exit 1
+}
+xcode_is_compatible "$xcode_sdk_version" "$supported_ios_sdk_version" || {
+    printf 'Xcode %s contains iPhoneOS SDK %s; workload %s expects SDK %s\n' \
+        "$xcode_version" "$xcode_sdk_version" "$manifest_version" "$supported_ios_sdk_version" >&2
     exit 1
 }
 
@@ -386,11 +567,17 @@ fi
 
 mkdir -p "$data_root/receipts" "$cache_root/downloads" "$cache_root/build" "$cache_root/sources" \
     "$cache_root/nuget/packages" "$cache_root/dotnet-cli-home" "$data_root/feeds" "$data_root/toolchains"
-python3 - "$marker" "$lock_sha256" "$dotnet_root" "$data_root" <<'PY'
+python3 - "$marker" "$lock_sha256" "$dotnet_root" "$data_root" "$project_version" \
+    "$install_id" "$sdk_version" "$workload_set_version" <<'PY'
 import json, os, sys
 from pathlib import Path
 path=Path(sys.argv[1])
-value={"schemaVersion":1,"owner":"dotnet-ios-linux","status":"installing","projectVersion":"0.1.0-preview.1","toolchainLockSha256":sys.argv[2],"dotnetRoot":sys.argv[3],"dataRoot":sys.argv[4]}
+value={
+ "schemaVersion":1,"owner":"dotnet-ios-linux","status":"installing",
+ "projectVersion":sys.argv[5],"installId":sys.argv[6],
+ "sdkVersion":sys.argv[7],"workloadSet":sys.argv[8],
+ "toolchainLockSha256":sys.argv[2],"dotnetRoot":sys.argv[3],"dataRoot":sys.argv[4],
+}
 temporary=path.with_name(path.name+f".tmp.{os.getpid()}")
 temporary.write_text(json.dumps(value,indent=2)+"\n",encoding="utf-8"); os.replace(temporary,path)
 PY
@@ -404,41 +591,55 @@ rollback_install() {
         "$script_dir/eng/install/workload-transaction.py" restore --root "$dotnet_root" --transaction "$workload_transaction" || true
     fi
     if [[ -f "$sdk_receipt" ]]; then
-        "$script_dir/eng/install/install-dotnet-sdk.py" uninstall --root "$dotnet_root" --receipt "$sdk_receipt" || true
+        "$script_dir/eng/install/install-dotnet-sdk.py" uninstall --root "$dotnet_root" \
+            --receipt "$sdk_receipt" --sdk-version "$sdk_version" || true
     fi
     [[ ! -f "$marker" ]] || rm -rf -- "$data_root"
     exit "$exit_code"
 }
 trap rollback_install ERR INT TERM
 
-download_verified "$sdk_url" sha512sum "$sdk_sha512" "$sdk_archive" "$offline"
+if [[ "$sdk_source" == installer ]]; then
+    download_verified "$sdk_url" sha512sum "$sdk_sha512" "$sdk_archive" "$offline"
+fi
 download_verified "$manifest_url" sha512sum "$manifest_sha512" "$manifest_archive" "$offline"
-download_verified "$workload_set_url" sha512sum "$workload_set_sha512" "$workload_set_archive" "$offline"
+if [[ "$workload_source" == installer ]]; then
+    download_verified "$workload_set_url" sha512sum "$workload_set_sha512" "$workload_set_archive" "$offline"
+fi
 python3 - "$manifest_archive" "$manifest_sha512_base64" <<'PY'
 import base64,hashlib,sys
 actual=base64.b64encode(hashlib.sha512(open(sys.argv[1],'rb').read()).digest()).decode()
 if actual != sys.argv[2]: raise SystemExit(f"official iOS manifest SHA-512 mismatch: {actual}")
 PY
 
-"$script_dir/eng/install/install-dotnet-sdk.py" install --archive "$sdk_archive" \
-    --root "$dotnet_root" --receipt "$sdk_receipt"
+if [[ "$sdk_source" == installer ]]; then
+    "$script_dir/eng/install/install-dotnet-sdk.py" install --archive "$sdk_archive" \
+        --root "$dotnet_root" --receipt "$sdk_receipt" --sdk-version "$sdk_version" \
+        --archive-sha512 "$sdk_sha512"
+else
+    [[ -x "$dotnet_root/dotnet" && -d "$dotnet_root/sdk/$sdk_version" ]] || {
+        printf 'selected .NET SDK %s is incomplete under %s\n' "$sdk_version" "$dotnet_root" >&2
+        false
+    }
+fi
 mkdir -p "$control_root"
-cat > "$control_root/global.json" <<'EOF'
-{
-  "sdk": {
-    "version": "10.0.402",
-    "rollForward": "disable",
-    "workloadVersion": "10.0.401.1"
-  }
-}
-EOF
+python3 - "$control_root/global.json" "$sdk_version" "$workload_set_version" <<'PY'
+import json, sys
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps({"sdk":{
+    "version":sys.argv[2],"rollForward":"disable","workloadVersion":sys.argv[3],
+}},indent=2)+"\n",encoding="utf-8")
+PY
 activate_environment
 [[ "$(cd "$control_root" && "$dotnet_root/dotnet" --version)" == "$sdk_version" ]]
-NUGET_CERT_REVOCATION_MODE=offline "$dotnet_root/dotnet" nuget verify --all \
-    "$manifest_archive" "$workload_set_archive" >/dev/null
+nuget_verify=("$manifest_archive")
+if [[ "$workload_source" == installer ]]; then
+    nuget_verify+=("$workload_set_archive")
+fi
+NUGET_CERT_REVOCATION_MODE=offline "$dotnet_root/dotnet" nuget verify --all "${nuget_verify[@]}" >/dev/null
 
 if [[ -z "$aot_pack" ]]; then
-    llvm_root="$cache_root/build/llvm-19.1.0-alpha.1.25461.1"
+    llvm_root="$cache_root/build/llvm-$llvm_version"
     llvm_args=()
     [[ "$offline" == false ]] || llvm_args+=(--offline)
     "$script_dir/eng/runtime/acquire-llvm.py" --dotnet "$dotnet_root/dotnet" \
@@ -469,46 +670,46 @@ fi
 "$script_dir/eng/workload/build-local-feed.py" --official-manifest "$manifest_archive" \
     --aot-pack "$aot_pack" --output "$feed"
 
-sdk_output="$data_root/apple-sdk/iPhoneOS27.0.sdk"
+sdk_output="$data_root/apple-sdk/iPhoneOS$xcode_sdk_version.sdk"
 if [[ ! -f "$sdk_output/.dotnet-ios-linux-sdk.json" ]]; then
     "$script_dir/eng/toolchain/import-xcode-sdk.py" --archive "$xcode_archive" \
-        --archive-sha256 "$xcode_sha256" --output "$sdk_output" \
-        --xcode-version 27.0 --xcode-build 27A266a \
-        --platform-version 27.0 --platform-build 24A430 \
-        --sdk-version 27.0 --sdk-build 24A430
+        --archive-sha256 "$xcode_archive_sha256" --output "$sdk_output" \
+        --xcode-version "$xcode_version" --xcode-build "$xcode_build" \
+        --platform-version "$platform_version" --platform-build "$platform_build" \
+        --sdk-version "$xcode_sdk_version" --sdk-build "$xcode_sdk_build"
 fi
-"$script_dir/eng/toolchain/build-synthetic-xcode.py" --sdk "$sdk_output" --sdk-version 27.0 \
-    --xcode-version 27.0 --xcode-build 27A266a --platform-build 24A430 \
+"$script_dir/eng/toolchain/build-synthetic-xcode.py" --sdk "$sdk_output" --sdk-version "$xcode_sdk_version" \
+    --xcode-version "$xcode_version" --xcode-build "$xcode_build" --platform-build "$platform_build" \
     --output "$data_root/Xcode.app" --mode symlink
 
 offline_args=()
 [[ "$offline" == false ]] || offline_args+=(--offline)
-"$script_dir/eng/toolchain/setup-swift.sh" --destination "$toolchain/swift-6.4.0" \
+"$script_dir/eng/toolchain/setup-swift.sh" --destination "$toolchain/swift-$swift_version" \
     --cache "$cache_root/downloads" "${offline_args[@]}"
-if [[ "$offline" == true && ! -d "$cache_root/sources/xtool-f0a1f90/.git" ]]; then
+if [[ "$offline" == true && ! -d "$cache_root/sources/xtool-$xtool_revision_short/.git" ]]; then
     printf 'xtool source is unavailable in offline mode\n' >&2
     false
 fi
-"$script_dir/eng/toolchain/setup-xtool.sh" --source-cache "$cache_root/sources/xtool-f0a1f90" \
-    --swift-root "$toolchain/swift-6.4.0" --destination "$toolchain/xtool-f0a1f90" \
+"$script_dir/eng/toolchain/setup-xtool.sh" --source-cache "$cache_root/sources/xtool-$xtool_revision_short" \
+    --swift-root "$toolchain/swift-$swift_version" --destination "$toolchain/xtool-$xtool_revision_short" \
     --package-cache "$cache_root/swiftpm" "${offline_args[@]}"
-"$script_dir/eng/toolchain/setup-python.sh" --destination "$toolchain/python-3.14.8" \
+"$script_dir/eng/toolchain/setup-python.sh" --destination "$toolchain/python-$python_version" \
     --cache "$cache_root/downloads" "${offline_args[@]}"
-"$script_dir/eng/toolchain/setup-pymobiledevice3.sh" --destination "$toolchain/pymobiledevice3-11.26.0" \
-    --python "$toolchain/python-3.14.8/bin/python3" --uv "$toolchain/python-3.14.8/bin/uv" \
+"$script_dir/eng/toolchain/setup-pymobiledevice3.sh" --destination "$toolchain/pymobiledevice3-$pymobiledevice3_version" \
+    --python "$toolchain/python-$python_version/bin/python3" --uv "$toolchain/python-$python_version/bin/uv" \
     --cache "$cache_root/uv" "${offline_args[@]}"
-"$script_dir/eng/toolchain/setup-rcodesign.sh" --destination "$toolchain/rcodesign-0.29.0" \
+"$script_dir/eng/toolchain/setup-rcodesign.sh" --destination "$toolchain/rcodesign-$rcodesign_version" \
     --cache "$cache_root/downloads" "${offline_args[@]}"
 
 mkdir -p "$data_root/bin"
-ln -s ../toolchains/"$install_id"/xtool-f0a1f90/xtool "$data_root/bin/xtool"
-ln -s ../toolchains/"$install_id"/pymobiledevice3-11.26.0/bin/pymobiledevice3 "$data_root/bin/pymobiledevice3"
-ln -s ../toolchains/"$install_id"/rcodesign-0.29.0/rcodesign "$data_root/bin/rcodesign"
+ln -s ../toolchains/"$install_id"/xtool-"$xtool_revision_short"/xtool "$data_root/bin/xtool"
+ln -s ../toolchains/"$install_id"/pymobiledevice3-"$pymobiledevice3_version"/bin/pymobiledevice3 "$data_root/bin/pymobiledevice3"
+ln -s ../toolchains/"$install_id"/rcodesign-"$rcodesign_version"/rcodesign "$data_root/bin/rcodesign"
 "$script_dir/eng/install/write-activation.py" --output "$data_root/activate" \
     --data-root "$data_root" --dotnet-root "$dotnet_root" \
-    --install-id "$install_id" --project-version "$project_version"
+    --install-id "$install_id" --project-version "$project_version" --swift-version "$swift_version"
 
-if [[ -e "$dotnet_root/metadata/workloads/10.0.400/InstalledWorkloads/ios" ]]; then
+if [[ -e "$dotnet_root/metadata/workloads/$sdk_feature_band/InstalledWorkloads/ios" ]]; then
     printf 'an ios workload already exists without this installer ownership; refusing to replace it\n' >&2
     false
 fi
@@ -518,23 +719,38 @@ mkdir -p "$cache_root/workload-temp"
     --configfile "$feed/NuGet.Config" --disable-parallel --temp-dir "$cache_root/workload-temp" --verbosity minimal)
 (cd "$control_root" && "$dotnet_root/dotnet" workload install ios \
     --configfile "$feed/NuGet.Config" --disable-parallel --temp-dir "$cache_root/workload-temp" --verbosity minimal)
-(cd "$control_root" && "$dotnet_root/dotnet" workload list) | grep -Eq '^ios[[:space:]]+27\.0\.10722/10\.0\.100'
+(cd "$control_root" && "$dotnet_root/dotnet" workload list) |
+    awk -v expected="$manifest_version/$manifest_suffix" \
+        '$1 == "ios" && $2 == expected { found=1 } END { exit !found }'
 [[ -x "$dotnet_root/packs/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/$project_version/tools/mono-aot-cross" ]]
 "$script_dir/eng/install/verify-workload-packages.py" --root "$dotnet_root" \
-    --feed "$feed" --lock "$script_dir/toolchain.lock.json" \
+    --feed "$feed" --lock "$lock_path" \
     --dotnet "$dotnet_root/dotnet"
+read_resolved_pairs install_context recommended-xcode --root "$dotnet_root" --lock "$lock_path"
+recommended_xcode_version="${install_context[recommended_xcode_version]}"
+xcode_is_compatible "$xcode_version" "$recommended_xcode_version" || {
+    printf 'Xcode %s is incompatible with installed iOS workload %s; expected Xcode %s\n' \
+        "$xcode_version" "$manifest_version" "$recommended_xcode_version" >&2
+    false
+}
 "$script_dir/eng/install/workload-transaction.py" commit --root "$dotnet_root" --transaction "$workload_transaction"
 
-python3 - "$receipt" "$lock_sha256" "$dotnet_root" "$data_root" "$cache_root" <<'PY'
+python3 - "$receipt" "$lock_sha256" "$dotnet_root" "$data_root" "$cache_root" \
+    "$project_version" "$install_id" "$sdk_version" "$sdk_source" "$workload_set_version" \
+    "$manifest_version" "$xcode_version" "$xcode_build" "$xcode_sdk_version" \
+    "$xcode_sdk_build" "$xcode_archive_sha256" "$locked_xcode_sha256" <<'PY'
 import json, os, sys
-receipt, lock_hash, dotnet, data, cache = map(Path, sys.argv[1:])
+from pathlib import Path
+receipt=Path(sys.argv[1])
 value={
  "schemaVersion":1,"owner":"dotnet-ios-linux","status":"complete",
- "projectVersion":"0.1.0-preview.1","installId":"0.1.0-preview.1-sdk-10.0.402",
- "toolchainLockSha256":str(lock_hash),"dotnetRoot":str(dotnet),"dataRoot":str(data),
- "cacheRoot":str(cache),"sdkVersion":"10.0.402","workloadSet":"10.0.401.1",
- "workloadId":"ios","manifestVersion":"27.0.10722",
- "xcode":{"version":"27.0","build":"27A266a","sdkVersion":"27.0","sdkBuild":"24A430"},
+ "projectVersion":sys.argv[6],"installId":sys.argv[7],
+ "toolchainLockSha256":sys.argv[2],"dotnetRoot":sys.argv[3],"dataRoot":sys.argv[4],
+ "cacheRoot":sys.argv[5],"sdkVersion":sys.argv[8],"sdkSource":sys.argv[9],
+ "workloadSet":sys.argv[10],"workloadId":"ios","manifestVersion":sys.argv[11],
+ "xcode":{"version":sys.argv[12],"build":sys.argv[13],"sdkVersion":sys.argv[14],
+          "sdkBuild":sys.argv[15],"archiveSha256":sys.argv[16],
+          "matchesLockedArchive":sys.argv[16] == sys.argv[17]},
  "credentialsStored":False,"pairingRecordsStored":False,"deviceIdentifiersStored":False,
 }
 receipt.parent.mkdir(parents=True,exist_ok=True)

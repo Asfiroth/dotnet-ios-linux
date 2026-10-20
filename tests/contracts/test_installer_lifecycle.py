@@ -21,6 +21,8 @@ DURABLE_ASSETS = REPOSITORY / "eng" / "install" / "durable-assets.py"
 ACTIVATION_WRITER = REPOSITORY / "eng" / "install" / "write-activation.py"
 DOWNLOAD_HELPER = REPOSITORY / "eng" / "install" / "download-verified.sh"
 TOP_LEVEL_INSTALLER = REPOSITORY / "install.sh"
+CONTEXT_RESOLVER = REPOSITORY / "eng" / "install" / "resolve-install-context.py"
+TEST_SDK_VERSION = "10.0.402"
 
 
 def load_script(path: Path, name: str):
@@ -54,13 +56,19 @@ class DotnetSdkMergeContracts(unittest.TestCase):
             for path in sorted(payload.rglob("*"), key=lambda item: (len(item.parts), str(item))):
                 archive.add(path, arcname=path.relative_to(payload).as_posix(), recursive=False)
         self.installer = load_script(SDK_INSTALLER, f"sdk_installer_{id(self)}")
-        self.installer.SDK_SHA512 = hashlib.sha512(self.archive.read_bytes()).hexdigest()
+        self.sdk_sha512 = hashlib.sha512(self.archive.read_bytes()).hexdigest()
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
     def install(self) -> None:
-        self.installer.install(self.archive, self.root.absolute(), self.receipt.absolute())
+        self.installer.install(
+            self.archive,
+            self.root.absolute(),
+            self.receipt.absolute(),
+            TEST_SDK_VERSION,
+            self.sdk_sha512,
+        )
 
     def test_merge_and_uninstall_preserve_preexisting_sdk_and_workload(self) -> None:
         write(self.root / "dotnet", "existing host\n", 0o755)
@@ -68,13 +76,15 @@ class DotnetSdkMergeContracts(unittest.TestCase):
         write(self.root / "packs" / "Existing.Workload" / "1.0" / "pack.txt", "existing pack\n")
 
         self.install()
-        self.installer.verify(self.root.absolute(), self.receipt.absolute())
+        self.installer.verify(self.root.absolute(), self.receipt.absolute(), TEST_SDK_VERSION)
         receipt = json.loads(self.receipt.read_text(encoding="utf-8"))
         retained = {item["path"]: item["reason"] for item in receipt["retainedFiles"]}
         self.assertEqual("existing-root", retained["dotnet"])
         self.assertEqual("existing host\n", (self.root / "dotnet").read_text(encoding="utf-8"))
 
-        self.installer.rollback(self.root.absolute(), self.receipt.absolute(), remove_receipt=True)
+        self.installer.rollback(
+            self.root.absolute(), self.receipt.absolute(), TEST_SDK_VERSION, remove_receipt=True
+        )
         self.assertFalse((self.root / "sdk" / "10.0.402").exists())
         self.assertEqual("existing sdk\n", (self.root / "sdk" / "9.0.100" / "existing.dll").read_text())
         self.assertEqual(
@@ -103,7 +113,7 @@ class DotnetSdkMergeContracts(unittest.TestCase):
 
         self.install()
 
-        self.installer.verify(self.root.absolute(), self.receipt.absolute())
+        self.installer.verify(self.root.absolute(), self.receipt.absolute(), TEST_SDK_VERSION)
         self.assertFalse(temporary.exists())
         self.assertEqual("committed", json.loads(self.receipt.read_text())["status"])
 
@@ -115,7 +125,9 @@ class DotnetSdkMergeContracts(unittest.TestCase):
         changed.write_text("user change\n", encoding="utf-8")
 
         with self.assertRaises(SystemExit):
-            self.installer.rollback(self.root.absolute(), self.receipt.absolute(), remove_receipt=True)
+            self.installer.rollback(
+                self.root.absolute(), self.receipt.absolute(), TEST_SDK_VERSION, remove_receipt=True
+            )
 
         self.assertTrue(self.receipt.exists())
         self.assertTrue(all(path.exists() for path in created))
@@ -225,6 +237,115 @@ class WorkloadTransactionContracts(unittest.TestCase):
 
 
 class TopLevelInstallerContracts(unittest.TestCase):
+    def run_context(self, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(CONTEXT_RESOLVER), *arguments],
+            check=check,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_install_context_reuses_latest_sdk_patch_in_feature_band(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="install-context-sdk-") as temporary:
+            root = Path(temporary)
+            for version in ("10.0.402", "10.0.499", "10.0.500", "11.0.100"):
+                (root / "sdk" / version).mkdir(parents=True)
+
+            result = self.run_context(
+                "sdk",
+                "--root",
+                str(root),
+                "--feature-band",
+                "10.0.400",
+                "--fallback",
+                "10.0.402",
+            )
+
+            self.assertEqual(
+                {"sdk_source": "preexisting", "sdk_version": "10.0.499"},
+                json.loads(result.stdout),
+            )
+
+    def test_install_context_selects_workload_set_matching_ios_manifest(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="install-context-workload-") as temporary:
+            root = Path(temporary)
+            workloadsets = root / "sdk-manifests" / "10.0.400" / "workloadsets"
+            for version, ios in (
+                ("10.0.401.1", "27.0.10722/10.0.100"),
+                ("10.0.402.1", "27.1.10018/10.0.100"),
+            ):
+                path = workloadsets / version / "microsoft.net.workloads.workloadset.json"
+                write(path, json.dumps({"Microsoft.NET.Sdk.iOS": ios}) + "\n")
+            write(
+                root / "metadata/workloads/X64/10.0.400/InstallState/default.json",
+                json.dumps({"workloadVersion": "10.0.402.1"}) + "\n",
+            )
+
+            result = self.run_context(
+                "workload",
+                "--root",
+                str(root),
+                "--feature-band",
+                "10.0.400",
+                "--manifest-version",
+                "27.0.10722",
+                "--manifest-suffix",
+                "10.0.100",
+                "--fallback",
+                "10.0.401.1",
+            )
+
+            self.assertEqual(
+                {"workload_source": "installed-compatible", "workload_version": "10.0.401.1"},
+                json.loads(result.stdout),
+            )
+
+    def test_xcode_compatibility_uses_workload_major_minor(self) -> None:
+        compatible = self.run_context(
+            "xcode-compatible", "--actual", "27.0.1", "--recommended", "27.0"
+        )
+        self.assertEqual("27.0", json.loads(compatible.stdout)["actual_xcode_family"])
+
+        incompatible = self.run_context(
+            "xcode-compatible",
+            "--actual",
+            "27.1",
+            "--recommended",
+            "27.0",
+            check=False,
+        )
+        self.assertNotEqual(0, incompatible.returncode)
+        self.assertIn("requires Xcode 27.0", incompatible.stderr)
+
+    def test_recommended_xcode_is_read_from_selected_ios_sdk_pack(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="install-context-xcode-") as temporary:
+            root = Path(temporary)
+            lock = json.loads((REPOSITORY / "toolchain.lock.json").read_text(encoding="utf-8"))
+            sdk_version = lock["components"]["appleSdk"]["iosSdkVersion"]
+            package = next(
+                item
+                for item in lock["components"]["linuxIosWorkload"]["packages"]
+                if item["id"].startswith("Microsoft.iOS.Sdk.")
+                and item["id"].endswith(f"_{sdk_version}")
+            )
+            props = root / package["installedArchive"]
+            props = props.parent / "targets" / "Microsoft.iOS.Sdk.Versions.props"
+            write(
+                props,
+                "<Project><PropertyGroup><RecommendedXcodeVersion>27.0</RecommendedXcodeVersion>"
+                "</PropertyGroup></Project>\n",
+            )
+
+            result = self.run_context(
+                "recommended-xcode",
+                "--root",
+                str(root),
+                "--lock",
+                str(REPOSITORY / "toolchain.lock.json"),
+            )
+
+            self.assertEqual("27.0", json.loads(result.stdout)["recommended_xcode_version"])
+
     def test_verified_download_uses_reserved_file_and_no_clobber_publication(self) -> None:
         with tempfile.TemporaryDirectory(prefix="verified-download-contract-") as temporary:
             base = Path(temporary)
@@ -456,6 +577,8 @@ fi
                     "0.1.0-preview.1-sdk-10.0.402",
                     "--project-version",
                     "0.1.0-preview.1",
+                    "--swift-version",
+                    "6.4.0",
                 ],
                 check=True,
             )

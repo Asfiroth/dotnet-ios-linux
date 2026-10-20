@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conflict-safe, receipt-backed installation of the pinned .NET SDK archive."""
+"""Conflict-safe, receipt-backed installation of a verified .NET SDK archive."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import secrets
 import stat
@@ -15,14 +16,17 @@ import tempfile
 from pathlib import Path, PurePosixPath
 
 
-SDK_VERSION = "10.0.402"
-SDK_SHA512 = "1904a98dda2db34ba78ba3c4fb1b224455329af91c341d83547843c1839e112b04ae699ee92fa2449a8f62249196a938723078c0c60b9f65c88539d5687729c2"
 OWNER = "dotnet-ios-linux"
 RETAINABLE_ROOT_FILES = {"dotnet", "dnx", "LICENSE.txt", "ThirdPartyNotices.txt"}
 
 
 def fail(message: str) -> "None":
     raise SystemExit(f".NET SDK installation failed: {message}")
+
+
+def validate_sdk_version(value: str) -> None:
+    if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", value) is None:
+        fail(f"invalid SDK version: {value!r}")
 
 
 def digest(path: Path, algorithm: str = "sha256") -> str:
@@ -100,20 +104,21 @@ def source_inventory(stage: Path) -> tuple[list[dict], list[str]]:
     return files, directories
 
 
-def load_receipt(path: Path, root: Path) -> dict:
+def load_receipt(path: Path, root: Path, sdk_version: str) -> dict:
+    validate_sdk_version(sdk_version)
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         fail(f"cannot read ownership receipt {path}: {error}")
-    if value.get("owner") != OWNER or value.get("sdkVersion") != SDK_VERSION:
+    if value.get("owner") != OWNER or value.get("sdkVersion") != sdk_version:
         fail(f"ownership receipt has different provenance: {path}")
     if value.get("dotnetRoot") != str(root):
         fail(f"ownership receipt belongs to a different .NET root: {path}")
     return value
 
 
-def rollback(root: Path, receipt_path: Path, *, remove_receipt: bool) -> None:
-    receipt = load_receipt(receipt_path, root)
+def rollback(root: Path, receipt_path: Path, sdk_version: str, *, remove_receipt: bool) -> None:
+    receipt = load_receipt(receipt_path, root, sdk_version)
     conflicts: list[str] = []
     created_files = list(receipt.get("createdFiles", []))
     for item in created_files:
@@ -156,8 +161,8 @@ def rollback(root: Path, receipt_path: Path, *, remove_receipt: bool) -> None:
         receipt_path.unlink(missing_ok=True)
 
 
-def verify(root: Path, receipt_path: Path) -> None:
-    receipt = load_receipt(receipt_path, root)
+def verify(root: Path, receipt_path: Path, sdk_version: str) -> None:
+    receipt = load_receipt(receipt_path, root, sdk_version)
     if receipt.get("status") != "committed":
         fail(f"SDK ownership receipt is incomplete: {receipt_path}")
     for item in receipt.get("createdFiles", []):
@@ -171,24 +176,30 @@ def verify(root: Path, receipt_path: Path) -> None:
             fail(f"owned SDK file failed integrity validation: {path}")
     if any(os.path.lexists(root / item["path"]) for item in receipt.get("temporaryFiles", [])):
         fail("SDK installation left temporary files in the canonical root")
-    sdk = root / "sdk" / SDK_VERSION
+    sdk = root / "sdk" / sdk_version
     if not sdk.is_dir() or not (root / "dotnet").is_file():
-        fail(f"SDK {SDK_VERSION} is incomplete under {root}")
+        fail(f"SDK {sdk_version} is incomplete under {root}")
 
 
-def install(archive: Path, root: Path, receipt_path: Path) -> None:
+def install(
+    archive: Path,
+    root: Path,
+    receipt_path: Path,
+    sdk_version: str,
+    sdk_sha512: str,
+) -> None:
     if root.is_symlink():
         fail(f"canonical SDK root must not be a symlink: {root}")
     if receipt_path.exists():
-        existing = load_receipt(receipt_path, root)
+        existing = load_receipt(receipt_path, root, sdk_version)
         if existing.get("status") == "committed":
-            verify(root, receipt_path)
+            verify(root, receipt_path, sdk_version)
             print(f"dotnet_root={root}")
             print("reused=true")
             return
-        rollback(root, receipt_path, remove_receipt=True)
+        rollback(root, receipt_path, sdk_version, remove_receipt=True)
 
-    if not archive.is_file() or digest(archive, "sha512") != SDK_SHA512:
+    if not archive.is_file() or digest(archive, "sha512") != sdk_sha512:
         fail(f"SDK archive SHA-512 mismatch: {archive}")
     root.parent.mkdir(parents=True, exist_ok=True)
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -242,8 +253,8 @@ def install(archive: Path, root: Path, receipt_path: Path) -> None:
             "schemaVersion": 1,
             "owner": OWNER,
             "status": "installing",
-            "sdkVersion": SDK_VERSION,
-            "archiveSha512": SDK_SHA512,
+            "sdkVersion": sdk_version,
+            "archiveSha512": sdk_sha512,
             "dotnetRoot": str(root),
             "createdFiles": created_files,
             "createdDirectories": created_directories,
@@ -268,12 +279,12 @@ def install(archive: Path, root: Path, receipt_path: Path) -> None:
                 os.link(temporary_file, target)
                 temporary_file.unlink()
         except BaseException:
-            rollback(root, receipt_path, remove_receipt=True)
+            rollback(root, receipt_path, sdk_version, remove_receipt=True)
             raise
         receipt["status"] = "committed"
         write_json(receipt_path, receipt)
 
-    verify(root, receipt_path)
+    verify(root, receipt_path, sdk_version)
     print(f"dotnet_root={root}")
     print("reused=false")
 
@@ -284,18 +295,30 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--archive", type=Path)
+    parser.add_argument("--sdk-version", required=True)
+    parser.add_argument("--archive-sha512")
     args = parser.parse_args()
     root = args.root.expanduser().absolute()
     receipt = args.receipt.expanduser().absolute()
     if args.command == "install":
         if args.archive is None:
             fail("--archive is required for install")
-        install(args.archive.expanduser().resolve(), root, receipt)
+        if args.archive_sha512 is None:
+            fail("--archive-sha512 is required for install")
+        if not re.fullmatch(r"[0-9a-f]{128}", args.archive_sha512):
+            fail("--archive-sha512 must contain 128 lowercase hex characters")
+        install(
+            args.archive.expanduser().resolve(),
+            root,
+            receipt,
+            args.sdk_version,
+            args.archive_sha512,
+        )
     elif args.command == "verify":
-        verify(root, receipt)
+        verify(root, receipt, args.sdk_version)
         print("dotnet_sdk=ok")
     else:
-        rollback(root, receipt, remove_receipt=True)
+        rollback(root, receipt, args.sdk_version, remove_receipt=True)
         print("dotnet_sdk=removed-owned-files")
 
 

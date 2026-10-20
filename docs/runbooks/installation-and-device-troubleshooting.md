@@ -21,16 +21,22 @@ receipts to bypass a failure.
 
 ## Installation fails before completion
 
-1. Verify that the operator-supplied archive is exactly Xcode `27.0 (27A266a)`
-   and matches the SHA-256 published in the root [README](../../README.md).
-2. Re-run the same command with the archive path, not an extracted `Xcode.app`.
-   A top-level installation deliberately requires the authentic XIP.
+1. Check the compatibility error emitted by the installer. The supplied Xcode
+   major/minor must match `RecommendedXcodeVersion` from the selected iOS SDK
+   workload pack; for example, a `27.0` workload does not accept Xcode `27.1`.
+2. Re-run the same command with the original archive path, not an extracted `Xcode.app`.
+   A top-level installation deliberately requires the original XIP layout.
 3. Run `./install.sh doctor` only after a completed install. For an interrupted
    transaction, retain the local diagnostics and re-run the supported install
    command; do not delete files under `~/.dotnet` opportunistically.
 4. If using `--offline`, confirm that every pinned archive and source checkout
    is already in the project cache. Offline mode intentionally fails rather than
    downloading or substituting versions.
+
+The installer may reuse a newer installed SDK patch within the supported feature
+band. It does not cross feature bands. It also selects only an installed workload
+set whose iOS mapping matches the locked runtime/AOT graph; a newer incompatible
+workload set is not silently substituted.
 
 ## `dotnet` or MSBuild selects the wrong SDK
 

@@ -29,7 +29,9 @@ commands including Bash, Python 3.10+, Git, curl, CMake, Ninja, Make, Clang,
 binutils, `flock`, and the standard checksum/archive tools. It never invokes a
 distro package manager or writes to `/usr`.
 
-Supply the exact authentic Xcode `27.0 (27A266a)` archive yourself:
+Supply an original Xcode XIP compatible with the selected iOS workload. The
+current workload recommends Xcode `27.0`; patch releases in that major/minor are
+accepted, while Xcode `27.1` is not:
 
 ```sh
 ./install.sh install --xcode-archive /private/path/Xcode_27.xip
@@ -37,10 +39,11 @@ source "${XDG_DATA_HOME:-$HOME/.local/share}/dotnet-ios-linux/activate"
 ./install.sh doctor
 ```
 
-The archive must have SHA-256
-`6a270c53a5a0c5e0ac78125342d44c3cfff2716ec390373cd5e30834d80a67c3`.
-Apple files are imported locally without metadata changes and are never part of
-this repository or its releases.
+The validated baseline archive hash remains recorded in `toolchain.lock.json`.
+Other compatible builds are structurally inspected and their observed hash and
+metadata are written to the installation receipt. Apple files are imported
+locally without metadata changes and are never part of this repository or its
+releases.
 
 Useful install options:
 
@@ -68,9 +71,20 @@ Installation locations are fixed by policy:
 - durable project data: `${XDG_DATA_HOME:-$HOME/.local/share}/dotnet-ios-linux`
 - disposable downloads/builds: `${XDG_CACHE_HOME:-$HOME/.cache}/dotnet-ios-linux`
 
-The installer merges SDK `10.0.402` without replacing conflicting files, uses a
-private `global.json` to pin workload set `10.0.401.1`, installs workload ID
-`ios`, and verifies every archive in the 12-package direct graph against
+The installer detects the newest SDK patch already present in `~/.dotnet` for
+the supported feature band. It falls back to the lock's hash-verified SDK only
+when no compatible SDK is installed. It likewise reuses an installed workload
+set only when that set maps `Microsoft.NET.Sdk.iOS` to the locked iOS manifest;
+otherwise it installs the lock's fallback workload set. A private `global.json`
+pins the resolved SDK and workload-set versions for the transaction.
+
+The supplied Xcode archive is inspected rather than matched to a hard-coded
+build. Its Xcode major/minor must match `RecommendedXcodeVersion` from the
+selected iOS SDK pack (for example, a workload requiring `27.0` rejects Xcode
+`27.1`). The imported iPhoneOS SDK must also match the locked workload family.
+The archive's observed metadata and SHA-256 are recorded in the receipt.
+
+The installer verifies every archive in the 12-package direct graph against
 `toolchain.lock.json`. Official NuGet archives must also pass author/repository
 signature verification; the deterministic local derivative and project packs
 are explicitly unsigned and hash-trusted. Downloads and staged directories use
@@ -85,16 +99,19 @@ same environment in your IDE.
 ./install.sh uninstall --yes --purge-cache
 ```
 
-Uninstall preflights hashes and removes only receipt-owned SDK, workload, and
-durable entries. It preserves unrelated SDKs, later workloads, workload history,
-and unknown files. A changed owned file blocks removal rather than being erased.
+Uninstall preflights hashes and removes only receipt-owned workload and durable
+entries, plus the fallback SDK when this installer had to add it. A compatible
+SDK that predated installation is never owned or removed. Uninstall preserves
+unrelated SDKs, later workloads, workload history, and unknown files. A changed
+owned file blocks removal rather than being erased.
 The cache is preserved by default; deleting it does not break an installed
 toolchain. `--purge-cache` is valid only with uninstall.
 
 ## Safety boundaries
 
-- Xcode must be operator-supplied; Apple SDKs are neither downloaded nor
-  redistributed by the project.
+- Xcode must be operator-supplied, structurally valid, and compatible with the
+  selected iOS workload's declared recommended Xcode major/minor; Apple SDKs are
+  neither downloaded nor redistributed by the project.
 - Swift 6.4.0, ncurses 6.6, libxml2 2.13.9, portable CPython 3.14.8, uv 0.9.10,
   xtool, rcodesign, pymobiledevice3, LLVM, and every workload package are pinned
   and hash checked.
@@ -115,6 +132,11 @@ The active baseline is SDK `10.0.402`, feature band `10.0.400`, workload set
 `19.1.0-alpha.1.25461.1`, Xcode `27.0 (27A266a)`, and iPhoneOS
 `27.0 (24A430)`. The first target is glibc Linux x86_64, `net10.0-ios`,
 `ios-arm64`, Mono, and a physical iPhone over USB.
+
+The baseline SDK is a verified fallback, not an exact-version ceiling. Later SDK
+patches in feature band `10.0.400` are selected automatically when installed;
+new feature bands or iOS workload graphs still require validation and a lock
+update because they can change runtime/AOT pack inputs.
 
 Simulator support, Linux arm64/musl, NativeAOT, CoreCLR, wireless deployment,
 managed debugging, hot reload, and App Store distribution are outside this MVP.

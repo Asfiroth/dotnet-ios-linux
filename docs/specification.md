@@ -160,7 +160,15 @@ Manifest-generated imports must load the Linux compatibility pack before the rel
 
 The standard CLI owns workload installation records; no records are fabricated by hand. Isolated gates pass update, install, list, restore, repair, uninstall, clean, and reinstall. Path-level three-way restoration preserves unrelated workload metadata and history, while pack receipts refuse modified owned payloads. A disposable copy containing real Android, MAUI Android, and Wasm workloads retained those workloads and shared packs after iOS uninstall.
 
-Normal application `global.json` stays standard. Bootstrap workload operations run beneath a private control `global.json` that pins SDK `10.0.402`, disables roll-forward, and pins workload set `10.0.401.1`. Official IDs map to NuGet.org while exact project IDs map to the local feed. Offline mode blocks downloads and succeeds only with a complete prepopulated cache.
+Normal application `global.json` stays standard. Bootstrap workload operations
+run beneath a private control `global.json` that pins the resolved installed SDK
+patch and compatible installed workload set for the transaction. SDK selection
+stays within the lock's supported feature band; workload-set selection requires
+an exact match for the locked iOS manifest mapping. The lock's SDK and workload
+set remain hash-verified fallbacks when compatible installations are absent.
+Official IDs map to NuGet.org while exact project IDs map to the local feed.
+Offline mode blocks downloads and succeeds only with a complete prepopulated
+cache.
 
 ### 4.3 Stock uno-check
 
@@ -258,7 +266,25 @@ Validate a minimal Uno application after the UIKit proof using the same TFM/RID 
 
 Bootstrap is the one custom entry point. Root `install.sh` implements `install`/`setup`, `doctor`, `uninstall`, `--offline`, `--dry-run`, confirmation control, cache control, and build parallelism. It is rootless, lock-serialized, idempotent, fail-closed, and receipt-backed. It installs only to canonical `~/.dotnet`, durable `${XDG_DATA_HOME:-$HOME/.local/share}/dotnet-ios-linux`, and disposable `${XDG_CACHE_HOME:-$HOME/.cache}/dotnet-ios-linux`. It never edits shell startup files.
 
-Install requires the exact operator-supplied authentic Xcode archive. It verifies all downloaded archives, source revisions, generated packages, staged output hashes, the effective manifest graph, official NuGet signatures, and the LLVM-enabled compiler before changing the final marker from `installing` to `complete`. Direct downloads use randomized reserved files, verify hashes before publication, and atomically publish without replacing a concurrent path. Staged directories use the same no-clobber rule except for explicit replacement of a verified project-owned SDK or synthetic bundle, which uses an atomic directory exchange. `doctor` verifies the SDK receipt, durable file/symlink/mode inventory, workload transaction, all direct package hashes and official signatures, tool versions, LLVM support, and synthetic Xcode metadata. A full top-level run still requires access to the authentic archive; component and lifecycle paths have been exercised independently.
+Install requires an operator-supplied Xcode archive and streams its Xcode,
+platform, and iPhoneOS SDK metadata before import. The archive's Xcode
+major/minor must match `RecommendedXcodeVersion` read from the selected installed
+iOS SDK pack; this deliberately rejects adjacent releases such as Xcode `27.1`
+for a workload declaring `27.0`. The observed archive hash and metadata are
+recorded rather than compiled into the installer. Install verifies all downloaded
+archives, source revisions, generated packages, staged output hashes, the
+effective manifest graph, official NuGet signatures, and the LLVM-enabled
+compiler before changing the final marker from `installing` to `complete`.
+Direct downloads use randomized reserved files, verify hashes before publication,
+and atomically publish without replacing a concurrent path. Staged directories
+use the same no-clobber rule except for explicit replacement of a verified
+project-owned SDK or synthetic bundle, which uses an atomic directory exchange.
+`doctor` verifies any installer-owned SDK receipt, the selected pre-existing SDK
+when reused, durable file/symlink/mode inventory, workload transaction, all
+direct package hashes and official signatures, tool versions, LLVM support,
+workload/Xcode compatibility, and synthetic Xcode metadata. A full top-level run
+still requires access to an Xcode archive; component and lifecycle paths have
+been exercised independently.
 
 Do not hand-edit workload metadata to fabricate installation success. Workload mutations are coordinated with the CLI and protected by a lifecycle lock. Uninstall preflights all receipts, removes only verified owned entries, restores only paths changed by this install, preserves later workloads/history and unknown durable files, and never deletes `~/.dotnet`. Cache deletion is optional and cannot break durable toolchain execution. Environment activation is explicit and reversible and does not globally intercept unrelated Apple tooling.
 
