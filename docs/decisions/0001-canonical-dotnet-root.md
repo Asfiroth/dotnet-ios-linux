@@ -1,6 +1,6 @@
 # ADR-0001: Use one canonical user-local .NET root
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-0006](0006-use-the-active-host-dotnet-root.md)
 **Date:** 2026-10-20
 **Owner:** Repository maintainer
 
@@ -36,7 +36,9 @@ SDKs, packs, workloads, and history.
 
 ## Evidence boundary and review
 
-The current lifecycle and coexistence boundary is summarized in the
+This historical user-local-root decision was superseded when the installer began
+using the active host `dotnet` root with a constrained privileged helper. The
+current lifecycle and coexistence boundary is summarized in the
 [compatibility matrix](../status/compatibility-matrix.md) and locked in
 [`toolchain.lock.json`](../../toolchain.lock.json). Rider and uno-check remain
 separate consumer gates; revisit this decision only if the standard workload

@@ -255,7 +255,7 @@ fail unless their explicit confirmation flag is present:
   --rcodesign-root /path/to/rcodesign-0.29.0
 
 /path/to/pymobiledevice3-11.26.0/bin/python eng/toolchain/device-ios-app.py \
-  launch --confirm-launch
+  launch --confirm-launch --bundle-identifier dev.dotnetioslinux.helloios
 ```
 
 The deployment wrapper requires exactly one USB device and opens only an
@@ -265,3 +265,21 @@ mounted personalized Developer Disk Image and establishes an in-process
 userspace tunnel with both lockdown auto-pairing and remote-pairing fallback
 disabled. DDI acquisition/mounting remains a separate explicit workflow because
 the image is Apple material and must come from an operator-approved source.
+
+For an installed toolchain, the repository-root runner applies the same
+boundaries to a compatible application project:
+
+```sh
+./run-ios-app.sh \
+  --project /absolute/path/to/App.csproj \
+  --signing-config /private/path/signing.json \
+  --confirm-install --confirm-launch
+```
+
+It runs `doctor`, requires the project to select the receipt-recorded SDK,
+builds only `Release`/`net10.0-ios`/`ios-arm64` into the private project cache,
+requires exactly one generated `.app`, signs a copy, and refuses to install when
+preflight reports that the personalized Developer Disk Image is not mounted.
+The current signing gate rejects app extensions because they require separate
+profiles. The runner does not pair a device, acquire or mount Apple material,
+or attach a debugger.

@@ -49,3 +49,6 @@ install, list, restore, repair, uninstall, clean, and reinstall. With a
 through LLVM AOT. Each installed official package archive is hash-checked and
 must pass NuGet author/repository signature verification; local derivative
 packages must remain unsigned. It never operates on `~/.dotnet`.
+The update/uninstall commands here are isolated SDK behavior gates; the
+production installer invokes only pinned `workload install ios` and performs
+receipt-backed teardown itself.

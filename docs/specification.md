@@ -3,7 +3,7 @@
 Status: experimental; private/local M2–M9 device-path evidence is recorded,
 sanitized receipt publication is pending, and the root bootstrap remains a
 candidate under validation.
-Date: 2026-10-17; last updated 2026-10-20.
+Date: 2026-10-17; last updated 2026-10-21.
 Target host: glibc Linux x86_64; current evidence host is EndeavourOS/Arch.
 Decision basis: accepted [architecture decision records](decisions/README.md).
 The “Linux Mac Development Setup” conversation
@@ -42,7 +42,7 @@ The first technical success is an unsigned minimal UIKit application. The first 
 
 | Area | Decision | Current evidence / remaining gate |
 | --- | --- | --- |
-| SDK root | Canonical development installation at `~/.dotnet` | Conflict-safe merge and Android/Wasm coexistence passed; Rider and uno-check remain |
+| SDK root | Root containing the real active host `dotnet` executable | Writable-root merge contracts pass; constrained system-root contracts pass; live package-manager-root qualification remains |
 | Workload identity | Public workload ID remains `ios` | Direct Linux graph installs as the sole effective `ios` definition |
 | Manifest | Deterministic unsigned derivative of `Microsoft.NET.Sdk.iOS.Manifest-10.0.100` `27.0.10722` | Update/install/list/restore/repair/uninstall/clean/reinstall passed |
 | Microsoft packs | Reuse exact official SDK, reference, runtime, task, and template packs | Complete 12-package direct graph is hash-locked; broader app coverage remains |
@@ -50,7 +50,7 @@ The first technical success is an unsigned minimal UIKit application. The first 
 | Xcode | Synthetic layout selected by `DEVELOPER_DIR` | Pinned macios discovery/native link passed; broader Xcode tool coverage remains |
 | Darwin backend | Reuse pinned omarchy-apple-dev components | Minimal Xcode 27 tool, signing, and deployment slice passed |
 | Uno environment check | Target: stock binary with a custom manifest | Pending qualification: Linux iOS check must run rather than be silently filtered out |
-| IDE | Stock Rider with canonical CLI | Target: evaluation/build; Run/debug remain separate gates |
+| IDE | Stock Rider with receipt-bound host CLI | Target: evaluation/build; Run/debug remain separate gates |
 
 Unless a row links to a published receipt, its completed-evidence wording refers
 to private/local observations summarized in the status matrix, not independently
@@ -110,7 +110,7 @@ Rider and stock uno-check remain separate unverified consumer gates:
 ```text
 Rider / terminal / stock uno-check + project manifest
                          |
-               canonical ~/.dotnet
+           receipt-bound host .NET root
                          |
           standard workload ios + MSBuild
                          |
@@ -140,13 +140,29 @@ Rider / terminal / stock uno-check + project manifest
 | macios patch set | Only irreducible host assumptions | Separate versioned patches; original packages retained |
 | Validation harness | Stage tests, negative cases, device receipts | Environment checks never stand in for running an app |
 
-### 4.1 Canonical .NET environment
+### 4.1 Receipt-bound host .NET environment
 
-All participating Android, WebAssembly, and iOS workloads live under the canonical `~/.dotnet` installation. Keep the package-manager-owned `/usr/share/dotnet` untouched. Existing canonical-root contents must be inventoried and preserved.
+The participating SDK/workload root is the directory containing
+`realpath "$(command -v dotnet)"`. A writable user root uses the unprivileged
+merge lifecycle. A non-writable package-manager root requires a compatible
+pre-existing SDK and uses the constrained workload helper defined by
+[ADR-0006](decisions/0006-use-the-active-host-dotnet-root.md); the project does
+not merge its fallback SDK into that root. Existing SDKs, Android/WebAssembly
+workloads, packs, metadata, and history must be inventoried and preserved.
 
-The generated activation file sets `DOTNET_ROOT`, puts its `dotnet` and tool directory on `PATH`, exports `DEVELOPER_DIR`, and adds the project shim directory for that development environment. Rider must explicitly select `~/.dotnet/dotnet` and receive the same environment when started through the desktop. Detect conflicting architecture-specific root variables and stale MSBuild SDK overrides.
+The generated activation file sets the receipt-recorded `DOTNET_ROOT`, puts its
+`dotnet` and tool directory on `PATH`, exports `DEVELOPER_DIR`, and adds the
+project shim directory for that development environment. Rider must explicitly
+select the same executable and receive the same environment when started through
+the desktop. Detect conflicting architecture-specific root variables and stale
+MSBuild SDK overrides.
 
-Doctor must compare resolved executable paths, `dotnet --info`, selected SDK, workload graph, and IDE configuration. A mismatch is an error with a concrete correction, not a reason to continue against another installation. Temporary test homes may isolate destructive lifecycle tests; they do not become a second production SDK root.
+Doctor must compare resolved executable paths, `dotnet --info`, selected SDK,
+workload graph, privileged ownership state when applicable, and IDE
+configuration. A mismatch is an error with a concrete correction, not a reason
+to continue against another installation. Temporary roots isolate destructive
+lifecycle tests; live package-manager-root mutation requires a separate
+disposable-host qualification.
 
 ### 4.2 Workload resolution and installation
 
@@ -158,17 +174,48 @@ The bootstrap stages and validates the complete graph before activation. Project
 
 Manifest-generated imports must load the Linux compatibility pack before the relevant upstream targets consume its values. Preserve official reference and device-runtime contents byte-for-byte. An official SDK pack may contain unusable Mach-O host executables; inventory those separately from its reusable managed assemblies.
 
-The standard CLI owns workload installation records; no records are fabricated by hand. Isolated gates pass update, install, list, restore, repair, uninstall, clean, and reinstall. Path-level three-way restoration preserves unrelated workload metadata and history, while pack receipts refuse modified owned payloads. A disposable copy containing real Android, MAUI Android, and Wasm workloads retained those workloads and shared packs after iOS uninstall.
+The standard CLI owns workload installation records; no records are fabricated by hand. Isolated test gates pass update, install, list, restore, repair, CLI uninstall, clean, and reinstall; production setup invokes only pinned install and uses receipt-backed restoration for teardown. Path-level three-way restoration preserves unrelated workload metadata and history, while pack receipts refuse modified owned payloads. A disposable copy containing real Android, MAUI Android, and Wasm workloads retained those workloads and shared packs after iOS uninstall.
 
 Normal application `global.json` stays standard. Bootstrap workload operations
 run beneath a private control `global.json` that pins the resolved installed SDK
 patch and compatible installed workload set for the transaction. SDK selection
 stays within the lock's supported feature band; workload-set selection requires
 an exact match for the locked iOS manifest mapping. The lock's SDK and workload
-set remain hash-verified fallbacks when compatible installations are absent.
+set remain hash-verified fallbacks when compatible installations are absent in
+a writable root. A non-writable root must already contain a compatible SDK, and
+the selected workload-set version must equal the lock. No SDK fallback is merged
+there; an absent exact workload set is supplied in the verified local-only
+bundle and installed by the constrained helper.
 Official IDs map to NuGet.org while exact project IDs map to the local feed.
 Offline mode blocks downloads and succeeds only with a complete prepopulated
 cache.
+
+For a non-writable root, all official and project packages plus the workload-set
+package are assembled into a deterministic local tar bundle after lock-hash and
+NuGet-signature verification. The root-owned helper validates that inventory
+again, rejects pre-existing unowned `ios` state, uses a root-scoped lock and
+root-owned journal, and runs privileged `dotnet` commands with an allowlisted
+environment in a new network namespace. Verify, recovery, and uninstall require
+the random ownership token recorded in both the user receipt and root state.
+The allowlist contains only private helper home/cache/temp paths, the selected
+`DOTNET_ROOT`, a fixed system `PATH` and locale, .NET first-run/telemetry controls,
+and fail-closed loopback proxy values. Workload children inherit the lifecycle
+lock descriptor, so helper termination cannot permit recovery while an orphaned
+child still mutates the root.
+
+Install and teardown use durable per-operation cursors, same-filesystem removal
+tombstones, atomic file replacement, data-before-journal fsync ordering, and an
+atomic finalization tombstone. Production installation invokes only the pinned
+`dotnet workload install ios`; teardown restores the exact receipt-owned paths
+and JSON key instead of invoking broad workload update or uninstall commands.
+While checking same-set consumers and restoring paths, the transaction holds the
+Linux `flock` honored by SDK `FileShare.None` on
+`globaljsonworkloadsets.json`. The owned JSON mutation is published last. Any
+other recorded key selecting the same workload set causes exact packs,
+manifests, workload-set data, and installation records to be retained.
+When a writable-root installation also added the selected SDK fallback, that
+intact SDK is retained and its project ownership is relinquished rather than
+stranding the recorded same-set consumer.
 
 ### 4.3 Stock uno-check
 
@@ -260,11 +307,24 @@ USB tests must record pairing/trust, Developer Mode where required, developer-im
 
 After M9, integrate proven operations behind ordinary MSBuild run targets where feasible. Building from Rider is a separate test from device discovery, Run, native debugging, and managed debugging. An IDE may enforce host checks before invoking MSBuild; if stock Rider blocks the workflow, document the exact limit rather than claiming automatic compatibility.
 
-Validate a minimal Uno application after the UIKit proof using the same TFM/RID and canonical SDK. Exercise the resource/native-library paths it adds. Successful `uno-check` alone is not Uno application support. Port ChambaXtra only after that minimal Uno device test passes.
+Validate a minimal Uno application after the UIKit proof using the same TFM/RID and receipt-bound host SDK. Exercise the resource/native-library paths it adds. Successful `uno-check` alone is not Uno application support. Port ChambaXtra only after that minimal Uno device test passes.
 
 ## 5. Bootstrap, lifecycle, and repository layout
 
-Bootstrap is the one custom entry point. Root `install.sh` implements `install`/`setup`, `doctor`, `uninstall`, `--offline`, `--dry-run`, confirmation control, cache control, and build parallelism. It is rootless, lock-serialized, idempotent, fail-closed, and receipt-backed. It installs only to canonical `~/.dotnet`, durable `${XDG_DATA_HOME:-$HOME/.local/share}/dotnet-ios-linux`, and disposable `${XDG_CACHE_HOME:-$HOME/.cache}/dotnet-ios-linux`. It never edits shell startup files.
+Bootstrap is the one custom entry point. Root `install.sh` implements `install`/`setup`, `doctor`, `uninstall`, `--offline`, `--dry-run`, confirmation control, cache control, and build parallelism. It rejects effective UID 0, is lock-serialized, idempotent, fail-closed, and receipt-backed. It targets the active host .NET root, durable `${XDG_DATA_HOME:-$HOME/.local/share}/dotnet-ios-linux`, and disposable `${XDG_CACHE_HOME:-$HOME/.cache}/dotnet-ios-linux`. It never edits shell startup files; after success it prints Bash or Zsh commands that make `run-ios-app.sh` globally discoverable.
+
+Writable roots use the ordinary user lifecycle and a root-specific lock stored in
+that root. Non-writable roots elevate only validated helper bootstrap operations
+and the installed root-owned helper. The helper and trust lock live below
+`/usr/local`, recovery state below `/var/lib/dotnet-ios-linux`, and root locks
+below `/run/lock/dotnet-ios-linux`. Package acquisition, local feed generation,
+bundle assembly, and signature/hash verification finish before elevation. The
+helper uses immutable content-addressed installed paths, isolated Python mode, no
+inherited execution environment, exact workload identity checks, and fail-closed
+network namespace isolation. Completed rollback and uninstall prune privileged
+package/cache payloads while retaining a small ownership/provenance tombstone;
+hash-matching packs retained by the workload CLI for another workload remain
+explicitly recorded rather than being deleted or forgotten.
 
 Install requires an operator-supplied Xcode archive and streams its Xcode,
 platform, and iPhoneOS SDK metadata before import. The archive's Xcode
@@ -286,7 +346,7 @@ workload/Xcode compatibility, and synthetic Xcode metadata. A full top-level run
 still requires access to an Xcode archive; component and lifecycle paths have
 been exercised independently.
 
-Do not hand-edit workload metadata to fabricate installation success. Workload mutations are coordinated with the CLI and protected by a lifecycle lock. Uninstall preflights all receipts, removes only verified owned entries, restores only paths changed by this install, preserves later workloads/history and unknown durable files, and never deletes `~/.dotnet`. Cache deletion is optional and cannot break durable toolchain execution. Environment activation is explicit and reversible and does not globally intercept unrelated Apple tooling.
+Do not hand-edit workload metadata to fabricate installation success. Workload mutations are coordinated with the CLI and protected by a target-root lifecycle lock. Uninstall preflights all receipts, requires the system ownership token when applicable, removes only verified owned entries, restores only paths changed by this install, and preserves later workloads/history and unknown durable files. It never deletes the selected host root. Cache deletion is optional and cannot break durable toolchain execution. Environment activation is explicit and reversible and does not globally intercept unrelated Apple tooling.
 
 Updates are explicit distribution upgrades. Test them in a temporary home before changing the canonical installation. Check unknown SDK/manifest/pack combinations before build and fail with the incompatible component identified. Keep diagnostic logs local by default and redact signing secrets and device identifiers before sharing.
 
@@ -328,7 +388,7 @@ Milestone numbering preserves the earlier discussion. M0/M1 may iterate together
 
 | Milestone | Work and deliverable | Exit evidence |
 | --- | --- | --- |
-| **M0 — Evaluate** | Inventory the reference Mac and Linux host; create baseline lock draft; select conflict-free `ios` manifest strategy; evaluate minimal `net10.0-ios` project | Canonical Linux SDK loads intended iOS targets without missing-SDK failure; binlog shows TFM/RID and effective manifest identities; next blocker classified |
+| **M0 — Evaluate** | Inventory the reference Mac and Linux host; create baseline lock draft; select conflict-free `ios` manifest strategy; evaluate minimal `net10.0-ios` project | Selected host Linux SDK loads intended iOS targets without missing-SDK failure; binlog shows TFM/RID and effective manifest identities; next blocker classified |
 | **M1 — Restore** | Generate manifest/package graph and feeds; install official and custom packs through CLI; resolve templates; validate stock uno-check input | Clean restore succeeds; `workload list` reports `ios`; no fabricated records; missing-pack negative test fails; lifecycle graph documented |
 | **M2 — Discover Xcode** | Import pinned SDK; construct layout; provide version/query wrappers | macios resolves correct SDK and tool paths through `DEVELOPER_DIR`; wrong/missing SDK fails clearly |
 | **M3 — Managed pipeline** | Run managed compilation, trimming/linking, registrar preparation as required; classify managed host assumptions | Required managed outputs exist and references resolve; binlog reaches AOT/native work without unexplained host bypasses |
@@ -354,8 +414,8 @@ Each receipt includes date, lock hash, exact commands, environment, exit codes, 
 | Shim contracts | Query/execution forms, quoting, response files, stderr, exit status, cancellation, unsupported arguments | Linux CI with fixtures and fake backend |
 | Compiler | Rebuild matched AOT host; compile generic/exception/interop probes; inspect generated code | Linux toolchain runner |
 | Build integration | Restore/evaluate/trim/AOT/link/bundle, clean/incremental builds, paths containing spaces | Private runner with user-supplied Apple SDK |
-| Lifecycle | Fresh install, repeated setup, interruption/rollback, repair, restore, uninstall, supported upgrade | Disposable homes; preserve unrelated workloads |
-| Coexistence | Android and WebAssembly builds before/after iOS install; non-iOS imports unaffected; conflicting official iOS manifest rejected | Canonical-root-equivalent test environment |
+| Lifecycle | Fresh install, repeated setup, interruption/rollback, repair, restore, uninstall, ownership-token mismatch, supported upgrade | Disposable user roots and disposable system-root hosts; preserve unrelated workloads |
+| Coexistence | Android and WebAssembly builds before/after iOS install; non-iOS imports unaffected; conflicting official iOS manifest rejected | Host-root-equivalent test environment |
 | Signing | Matching and mismatched identities/profiles, nested code, tampered resources, expiration | Private signing environment |
 | Device | USB install, launch, relaunch, runtime probes, resource rendering, logs | Recorded physical iPhone |
 | Consumer | Stock uno-check positive/negative cases; Rider evaluation/build; minimal Uno device run | Pinned consumer versions |
@@ -392,7 +452,8 @@ dotnet build tests/HelloIos/HelloIos.csproj -f net10.0-ios -r ios-arm64 -c Relea
 | Signing or device protocols change | Installation/launch failure | Pin tools and device OS evidence; separate errors from compilation |
 | Rider blocks Linux iOS before MSBuild | IDE promise unmet despite CLI success | Early evaluation test; report precise limitation; no automatic support claim |
 | uno-check filters out iOS or repairs wrong manifest | False green or broken installation | Positive/negative check tests and remediation capture |
-| Installer damages shared canonical root | Other development workloads fail | Inventory, staging, transaction receipts, rollback/coexistence tests |
+| Installer damages a shared host root | Other development workloads fail | Target-root lock, sealed offline bundle, root-owned journal, ownership token, rollback/coexistence tests, disposable live-root gate |
+| Privileged workload process reaches the network or inherits caller code | Root compromise or unreviewed package acquisition | Fixed installed helper, isolated Python, allowlisted environment, local-only feed, network namespace; fail closed when isolation is unavailable |
 | Redistribution rights differ by component | Unshippable binary bundle | User-supplied Apple SDK; per-component provenance/license review |
 | Minimal UIKit success overgeneralized to Uno/MAUI | Misleading support scope | Separate application gates and release matrix entries |
 
@@ -404,7 +465,7 @@ No arbitrary calendar estimates are assigned before the compiler and manifest ga
 
 **Device MVP (M9):** the same bundle is signed, installed over USB, and launched on the recorded iPhone. Hello UI and runtime probes succeed across a clean rebuild and a subsequent incremental rebuild. Direct backend sign/deploy commands are acceptable at this research stage; document them explicitly.
 
-**Usable compatibility preview:** M9 plus reproducible bootstrap, validated workload install/list/restore/repair/uninstall, safe rollback, canonical-root agreement, stock uno-check checking iOS correctly, stock Rider evaluation/build, and an unchanged minimal Uno project running on the device. Standard run-target integration is reported separately until passed. Any missing consumer gate means the release is labeled a narrower CLI/device proof.
+**Usable compatibility preview:** M9 plus reproducible bootstrap, validated workload install/list/restore/repair/uninstall, safe rollback, receipt-bound host-root agreement, stock uno-check checking iOS correctly, stock Rider evaluation/build, and an unchanged minimal Uno project running on the device. Standard run-target integration is reported separately until passed. Any missing consumer gate means the release is labeled a narrower CLI/device proof.
 
 **Debugging claim (M10):** limited to the native operations actually demonstrated. LLDB attachment does not imply C# debugging, hot reload, or Rider debugger integration.
 
@@ -417,12 +478,15 @@ Every release publishes the exact tested host, SDK/runtime/toolchain, device OS,
    to a record in the evidence index.
 2. Run complete install/doctor/reinstall/uninstall from root `install.sh` in an
    isolated home when the authentic `Xcode_27.xip` is available.
-3. Add negative deployment cases without exposing credentials or device identifiers.
-4. Qualify stock uno-check against the installed `ios` graph.
-5. Qualify Rider evaluation/build against canonical `~/.dotnet` and the activation environment.
-6. Run an unchanged minimal Uno app through build, signing, installation, and device probes.
-7. Expand supported resource/native-library cases without broadening claims beyond evidence.
-8. Research automated CoreDevice launch only with an operator-approved personalized DDI.
+3. Qualify the constrained helper against a disposable package-manager-style
+   system root with unrelated workloads; do not use a live workstation root as
+   the first qualification target.
+4. Add negative deployment cases without exposing credentials or device identifiers.
+5. Qualify stock uno-check against the installed `ios` graph.
+6. Qualify Rider evaluation/build against the receipt-bound host root and activation environment.
+7. Run an unchanged minimal Uno app through build, signing, installation, and device probes.
+8. Expand supported resource/native-library cases without broadening claims beyond evidence.
+9. Research automated CoreDevice launch only with an operator-approved personalized DDI.
 
 ## 11. Source and evidence notes
 

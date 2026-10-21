@@ -1,6 +1,6 @@
 # Compatibility Status
 
-**Last reviewed:** 2026-10-20
+**Last reviewed:** 2026-10-21
 
 **Active baseline:** [toolchain.lock.json](../../toolchain.lock.json)
 
@@ -18,8 +18,8 @@ auditable from this repository.
 
 | Area | Current boundary | Evidence state | Traceability |
 | --- | --- | --- | --- |
-| Linux host | glibc Linux x86_64; observed on EndeavourOS/Arch | SDK-free contracts, lifecycle, and device path observed | [Lock](../../toolchain.lock.json) + [private historical summary](../evidence/historical/m0-to-m9-observations.md); receipt pending |
-| .NET SDK | 10.0.402 / feature band 10.0.400 | Archive hash verified; conflict-safe merge and Android/Wasm coexistence observed | [Lock](../../toolchain.lock.json); receipt pending |
+| Linux host | glibc Linux x86_64; device path observed on EndeavourOS/Arch | General-Linux installer contracts pass; cross-distribution system-root qualification pending | [Lock](../../toolchain.lock.json) + [private historical summary](../evidence/historical/m0-to-m9-observations.md); receipt pending |
+| .NET SDK | Active host root; 10.0.402 / feature band 10.0.400 baseline | Host-root discovery and writable-root merge contracts pass; live package-manager root pending | [ADR-0006](../decisions/0006-use-the-active-host-dotnet-root.md) + [lock](../../toolchain.lock.json); receipt pending |
 | macios | 27.0.10722 / Xcode 27.0 | Linux discovery through physical-device launch observed for the minimal UIKit sample | [Historical summary](../evidence/historical/m0-to-m9-observations.md); M2–M9 receipts pending |
 | Workload set | CLI 10.0.401.1 / package 10.401.1 | Private `global.json` pin and isolated lifecycle observed | [Lock](../../toolchain.lock.json); receipt pending |
 | iOS workload | Public `ios` ID | Deterministic unsigned official-ID derivative with a direct Linux graph | [ADR-0002](../decisions/0002-standard-ios-workload-identity.md) + [lock](../../toolchain.lock.json) |
@@ -27,7 +27,7 @@ auditable from this repository.
 | Apple SDK | Xcode 27.0 / iPhoneOS 27.0, operator supplied | Archive/SDK metadata verified; SDK is never distributed | [ADR-0003](../decisions/0003-synthetic-xcode-through-developer-dir.md) + [provenance policy](../governance/provenance-and-redistribution.md) |
 | Darwin backend | Minimal Linux Clang/LLD adapter | Required discovery, compilation, link, and minimal app path observed | Historical summary; broader tool coverage pending |
 | Signing and USB deployment | Development identity and paired iPhone | Private sign/install/manual-launch path observed | [ADR-0005](../decisions/0005-explicit-signing-and-deployment-boundary.md) + historical summary; receipt pending |
-| Root bootstrap | `install.sh` candidate | Component and lifecycle paths exercised; full archive-backed top-level run pending | [Specification](../specification.md#5-bootstrap-lifecycle-and-repository-layout) |
+| Root bootstrap | `install.sh` host-root candidate | Writable lifecycle plus sealed-bundle/helper contracts pass; no live `/usr/share/dotnet` mutation has been qualified | [ADR-0006](../decisions/0006-use-the-active-host-dotnet-root.md) + [specification](../specification.md#5-bootstrap-lifecycle-and-repository-layout) |
 | Uno and Rider | Stock consumers | Not started | Separate consumer-gate receipts required |
 | Debugging | Native research only | Not started | M10 evidence required |
 

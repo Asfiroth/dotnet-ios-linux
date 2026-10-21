@@ -8,6 +8,7 @@ cd "$repository"
 required_paths=(
     LICENSE
     README.md
+    run-ios-app.sh
     toolchain.lock.json
     docs/specification.md
     docs/status/compatibility-matrix.md

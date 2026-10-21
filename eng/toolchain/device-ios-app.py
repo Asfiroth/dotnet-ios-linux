@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install and launch the signed probe without auto-pairing or identifier output."""
+"""Install and launch a signed iOS app without auto-pairing or identifier output."""
 
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ from pymobiledevice3.services.mobile_image_mounter import PersonalizedImageMount
 
 
 EXPECTED_PYMOBILEDEVICE3_VERSION = "11.26.0"
-EXPECTED_BUNDLE_IDENTIFIER = "dev.dotnetioslinux.helloios"
 
 
 class DeviceWorkflowError(Exception):
@@ -73,7 +72,12 @@ def parse_arguments() -> argparse.Namespace:
         help="required acknowledgement that this action mutates the connected device",
     )
 
-    launch = subparsers.add_parser("launch", help="launch the installed probe")
+    launch = subparsers.add_parser("launch", help="launch the installed application")
+    launch.add_argument(
+        "--bundle-identifier",
+        required=True,
+        help="bundle identifier of the already installed application",
+    )
     launch.add_argument(
         "--confirm-launch",
         action="store_true",
@@ -139,14 +143,19 @@ def decode_profile(profile: Path) -> dict:
     return value
 
 
-def validate_signed_app(app: Path, rcodesign_root: Path) -> tuple[Path, dict]:
+def validate_bundle_identifier(value: str) -> str:
+    if not SIGNING.BUNDLE_PATTERN.fullmatch(value):
+        raise DeviceWorkflowError("bundle identifier is invalid")
+    return value
+
+
+def validate_signed_app(app: Path, rcodesign_root: Path) -> tuple[Path, dict, str]:
     try:
         resolved = app.expanduser().resolve(strict=True)
     except OSError as error:
         raise DeviceWorkflowError(f"cannot access signed app: {type(error).__name__}") from error
     bundle_identifier, executable = SIGNING.app_metadata(resolved)
-    if bundle_identifier != EXPECTED_BUNDLE_IDENTIFIER:
-        raise DeviceWorkflowError("signed app has an unexpected bundle identifier")
+    validate_bundle_identifier(bundle_identifier)
     if not SIGNING.has_code_signature_load_command(executable):
         raise DeviceWorkflowError("app executable has no LC_CODE_SIGNATURE")
     if not (resolved / "_CodeSignature" / "CodeResources").is_file():
@@ -163,7 +172,7 @@ def validate_signed_app(app: Path, rcodesign_root: Path) -> tuple[Path, dict]:
         [str(rcodesign), "--config-file", "/dev/null", "verify", str(executable)],
         "app executable signature verification failed",
     )
-    return resolved, decode_profile(profile_path)
+    return resolved, decode_profile(profile_path), bundle_identifier
 
 
 async def sole_usb_device():
@@ -196,7 +205,7 @@ async def personalized_image_is_mounted(lockdown) -> bool:
 
 
 async def preflight(app: Path, rcodesign_root: Path) -> tuple[Path, object, bool]:
-    signed_app, profile = validate_signed_app(app, rcodesign_root)
+    signed_app, profile, _ = validate_signed_app(app, rcodesign_root)
     device = await sole_usb_device()
     if not profile_authorizes_device(profile, device.serial):
         raise DeviceWorkflowError("connected USB device is not authorized by the embedded profile")
@@ -209,7 +218,7 @@ async def preflight(app: Path, rcodesign_root: Path) -> tuple[Path, object, bool
 
 
 async def install_app(app: Path, rcodesign_root: Path) -> bool:
-    signed_app, profile = validate_signed_app(app, rcodesign_root)
+    signed_app, profile, bundle_identifier = validate_signed_app(app, rcodesign_root)
     device = await sole_usb_device()
     if not profile_authorizes_device(profile, device.serial):
         raise DeviceWorkflowError("connected USB device is not authorized by the embedded profile")
@@ -217,13 +226,14 @@ async def install_app(app: Path, rcodesign_root: Path) -> bool:
     try:
         installation = InstallationProxyService(lockdown=lockdown)
         await installation.install_from_local(signed_app, developer=True)
-        apps = await installation.get_apps(bundle_identifiers=[EXPECTED_BUNDLE_IDENTIFIER])
-        return EXPECTED_BUNDLE_IDENTIFIER in apps
+        apps = await installation.get_apps(bundle_identifiers=[bundle_identifier])
+        return bundle_identifier in apps
     finally:
         await lockdown.close()
 
 
-async def launch_app() -> None:
+async def launch_app(bundle_identifier: str) -> None:
+    validate_bundle_identifier(bundle_identifier)
     device = await sole_usb_device()
     lockdown = await open_existing_pairing(device)
     try:
@@ -238,7 +248,7 @@ async def launch_app() -> None:
     ) as rsd:
         async with AppServiceService(rsd) as app_service:
             await app_service.launch_application(
-                EXPECTED_BUNDLE_IDENTIFIER,
+                bundle_identifier,
                 arguments=[],
                 kill_existing=True,
                 start_suspended=False,
@@ -268,7 +278,7 @@ async def execute(arguments: argparse.Namespace) -> None:
     if arguments.action == "launch":
         if not arguments.confirm_launch:
             raise DeviceWorkflowError("launch requires --confirm-launch")
-        await launch_app()
+        await launch_app(arguments.bundle_identifier)
         print("launch=success")
         print("launched_bundle_match=true")
         return

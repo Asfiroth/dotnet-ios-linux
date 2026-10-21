@@ -15,6 +15,11 @@ import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
 
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from atomic import fsync_directory, fsync_file, fsync_path_state, mkdir_durable
+
 
 OWNER = "dotnet-ios-linux"
 RETAINABLE_ROOT_FILES = {"dotnet", "dnx", "LICENSE.txt", "ThirdPartyNotices.txt"}
@@ -39,9 +44,23 @@ def digest(path: Path, algorithm: str = "sha256") -> str:
 
 def write_json(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + f".tmp.{os.getpid()}")
-    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    descriptor, raw_temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(raw_temporary)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def safe_name(raw: str) -> PurePosixPath | None:
@@ -52,6 +71,42 @@ def safe_name(raw: str) -> PurePosixPath | None:
     if value.is_absolute() or any(part in {"", ".", ".."} for part in value.parts):
         fail(f"unsafe SDK archive member: {raw!r}")
     return value
+
+
+def safe_receipt_path(raw: object, label: str) -> Path:
+    if not isinstance(raw, str):
+        fail(f"ownership receipt has a non-string {label} path")
+    value = PurePosixPath(raw)
+    if value.is_absolute() or not value.parts or any(part in {"", ".", ".."} for part in value.parts):
+        fail(f"ownership receipt has an unsafe {label} path: {raw!r}")
+    return Path(*value.parts)
+
+
+def receipt_items(value: object, label: str) -> list[dict]:
+    if not isinstance(value, list):
+        fail(f"ownership receipt has an invalid {label} list")
+    result: list[dict] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            fail(f"ownership receipt has an invalid {label} record")
+        relative = safe_receipt_path(item.get("path"), label).as_posix()
+        if relative in seen:
+            fail(f"ownership receipt has a duplicate {label} path: {relative}")
+        seen.add(relative)
+        result.append(item | {"path": relative})
+    return result
+
+
+def ensure_no_symlink_ancestors(root: Path, relative: Path, *, include_leaf: bool = False) -> None:
+    current = root
+    parts = relative.parts if include_leaf else relative.parts[:-1]
+    for part in parts:
+        current /= part
+        if current.is_symlink():
+            fail(f"SDK path has a symlink ancestor: {current}")
+        if os.path.lexists(current) and not current.is_dir():
+            fail(f"SDK path has a non-directory ancestor: {current}")
 
 
 def extract(archive: Path, output: Path) -> None:
@@ -114,15 +169,29 @@ def load_receipt(path: Path, root: Path, sdk_version: str) -> dict:
         fail(f"ownership receipt has different provenance: {path}")
     if value.get("dotnetRoot") != str(root):
         fail(f"ownership receipt belongs to a different .NET root: {path}")
+    receipt_items(value.get("createdFiles", []), "created file")
+    receipt_items(value.get("temporaryFiles", []), "temporary file")
+    receipt_items(value.get("retainedFiles", []), "retained file")
+    directories = value.get("createdDirectories", [])
+    if not isinstance(directories, list):
+        fail("ownership receipt has an invalid created directory list")
+    seen_directories: set[str] = set()
+    for raw in directories:
+        relative = safe_receipt_path(raw, "created directory").as_posix()
+        if relative in seen_directories:
+            fail(f"ownership receipt has a duplicate created directory path: {relative}")
+        seen_directories.add(relative)
     return value
 
 
 def rollback(root: Path, receipt_path: Path, sdk_version: str, *, remove_receipt: bool) -> None:
     receipt = load_receipt(receipt_path, root, sdk_version)
     conflicts: list[str] = []
-    created_files = list(receipt.get("createdFiles", []))
+    created_files = receipt_items(receipt.get("createdFiles", []), "created file")
     for item in created_files:
-        path = root / item["path"]
+        relative = safe_receipt_path(item["path"], "created file")
+        ensure_no_symlink_ancestors(root, relative)
+        path = root / relative
         if not os.path.lexists(path):
             continue
         if (
@@ -132,41 +201,65 @@ def rollback(root: Path, receipt_path: Path, sdk_version: str, *, remove_receipt
             or stat.S_IMODE(path.stat().st_mode) != item["mode"]
         ):
             conflicts.append(item["path"])
-    temporary_files = list(receipt.get("temporaryFiles", []))
+    temporary_files = receipt_items(receipt.get("temporaryFiles", []), "temporary file")
     for item in temporary_files:
-        path = root / item["path"]
+        relative = safe_receipt_path(item["path"], "temporary file")
+        ensure_no_symlink_ancestors(root, relative)
+        path = root / relative
         if os.path.lexists(path) and (path.is_symlink() or not path.is_file()):
             conflicts.append(item["path"])
     if conflicts:
         fail("owned SDK files changed; refusing to remove: " + ", ".join(conflicts))
 
     for item in reversed(created_files):
-        (root / item["path"]).unlink(missing_ok=True)
+        path = root / safe_receipt_path(item["path"], "created file")
+        if os.path.lexists(path):
+            path.unlink()
+            fsync_directory(path.parent)
+        else:
+            fsync_path_state(path)
     # These randomized paths are reserved in the installing receipt before any
     # bytes are written. A partial file is therefore safe to remove when an
     # interrupted installation resumes.
     for item in temporary_files:
-        (root / item["path"]).unlink(missing_ok=True)
-    for relative in sorted(receipt.get("createdDirectories", []), key=lambda x: (x.count("/"), x), reverse=True):
+        path = root / safe_receipt_path(item["path"], "temporary file")
+        if os.path.lexists(path):
+            path.unlink()
+            fsync_directory(path.parent)
+        else:
+            fsync_path_state(path)
+    created_directories = [
+        safe_receipt_path(raw, "created directory")
+        for raw in receipt.get("createdDirectories", [])
+    ]
+    for relative in sorted(created_directories, key=lambda x: (len(x.parts), x.as_posix()), reverse=True):
+        ensure_no_symlink_ancestors(root, relative)
         path = root / relative
         try:
             path.rmdir()
+            fsync_directory(path.parent)
         except FileNotFoundError:
-            pass
+            fsync_path_state(path)
         except OSError:
             # Workload files or another SDK may legitimately keep a merged
             # directory non-empty; the installer never owns those contents.
             pass
     if remove_receipt:
-        receipt_path.unlink(missing_ok=True)
+        if os.path.lexists(receipt_path):
+            receipt_path.unlink()
+            fsync_directory(receipt_path.parent)
+        else:
+            fsync_path_state(receipt_path)
 
 
 def verify(root: Path, receipt_path: Path, sdk_version: str) -> None:
     receipt = load_receipt(receipt_path, root, sdk_version)
     if receipt.get("status") != "committed":
         fail(f"SDK ownership receipt is incomplete: {receipt_path}")
-    for item in receipt.get("createdFiles", []):
-        path = root / item["path"]
+    for item in receipt_items(receipt.get("createdFiles", []), "created file"):
+        relative = safe_receipt_path(item["path"], "created file")
+        ensure_no_symlink_ancestors(root, relative)
+        path = root / relative
         if (
             not path.is_file()
             or path.is_symlink()
@@ -174,11 +267,22 @@ def verify(root: Path, receipt_path: Path, sdk_version: str) -> None:
             or stat.S_IMODE(path.stat().st_mode) != item["mode"]
         ):
             fail(f"owned SDK file failed integrity validation: {path}")
-    if any(os.path.lexists(root / item["path"]) for item in receipt.get("temporaryFiles", [])):
+    if any(
+        os.path.lexists(root / safe_receipt_path(item["path"], "temporary file"))
+        for item in receipt_items(receipt.get("temporaryFiles", []), "temporary file")
+    ):
         fail("SDK installation left temporary files in the canonical root")
     sdk = root / "sdk" / sdk_version
     if not sdk.is_dir() or not (root / "dotnet").is_file():
         fail(f"SDK {sdk_version} is incomplete under {root}")
+
+
+def release(root: Path, receipt_path: Path, sdk_version: str) -> None:
+    """Relinquish intact SDK files that retained shared workload state may need."""
+    verify(root, receipt_path, sdk_version)
+    receipt_path.unlink()
+    fsync_directory(receipt_path.parent)
+    print("dotnet_sdk=released")
 
 
 def install(
@@ -201,8 +305,8 @@ def install(
 
     if not archive.is_file() or digest(archive, "sha512") != sdk_sha512:
         fail(f"SDK archive SHA-512 mismatch: {archive}")
-    root.parent.mkdir(parents=True, exist_ok=True)
-    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    mkdir_durable(root.parent)
+    mkdir_durable(receipt_path.parent, mode=0o700)
     with tempfile.TemporaryDirectory(prefix=".dotnet-sdk-stage-", dir=receipt_path.parent) as temporary:
         stage = Path(temporary)
         extract(archive, stage)
@@ -215,13 +319,17 @@ def install(
         if root.exists() and not root.is_dir():
             fail(f"canonical SDK root is not a directory: {root}")
         for relative in directories:
-            target = root / relative
+            relative_path = safe_receipt_path(relative, "SDK directory")
+            ensure_no_symlink_ancestors(root, relative_path, include_leaf=True)
+            target = root / relative_path
             if os.path.lexists(target) and (target.is_symlink() or not target.is_dir()):
                 fail(f"SDK directory conflicts with an existing path: {target}")
             if not target.exists():
                 created_directories.append(relative)
         for item in files:
-            target = root / item["path"]
+            relative_path = safe_receipt_path(item["path"], "SDK file")
+            ensure_no_symlink_ancestors(root, relative_path)
+            target = root / relative_path
             if not os.path.lexists(target):
                 created_files.append(item)
                 continue
@@ -263,24 +371,41 @@ def install(
         }
         write_json(receipt_path, receipt)
         try:
-            root.mkdir(parents=True, exist_ok=True)
+            mkdir_durable(root)
             for relative in sorted(created_directories, key=lambda x: (x.count("/"), x)):
-                (root / relative).mkdir(exist_ok=False)
+                mkdir_durable(root / relative)
             for item, temporary_item in zip(created_files, temporary_files, strict=True):
                 source = stage / item["path"]
                 target = root / item["path"]
                 temporary_file = root / temporary_item["path"]
                 with source.open("rb") as input_stream, temporary_file.open("xb") as output_stream:
                     shutil.copyfileobj(input_stream, output_stream, 1024 * 1024)
+                    output_stream.flush()
+                    os.fsync(output_stream.fileno())
                 temporary_file.chmod(item["mode"])
+                fsync_file(temporary_file)
                 if digest(temporary_file) != item["sha256"]:
                     fail(f"copied SDK file failed integrity validation: {temporary_file}")
                 # Publish without replacing a path that appeared after preflight.
                 os.link(temporary_file, target)
+                fsync_directory(target.parent)
                 temporary_file.unlink()
+                fsync_directory(temporary_file.parent)
         except BaseException:
             rollback(root, receipt_path, sdk_version, remove_receipt=True)
             raise
+        for item in created_files:
+            fsync_file(root / safe_receipt_path(item["path"], "created file"))
+        for relative in sorted(
+            created_directories,
+            key=lambda value: (value.count("/"), value),
+            reverse=True,
+        ):
+            path = root / safe_receipt_path(relative, "created directory")
+            if path.is_dir() and not path.is_symlink():
+                fsync_directory(path)
+        fsync_directory(root)
+        fsync_directory(root.parent)
         receipt["status"] = "committed"
         write_json(receipt_path, receipt)
 
@@ -291,7 +416,7 @@ def install(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("install", "verify", "uninstall"))
+    parser.add_argument("command", choices=("install", "verify", "uninstall", "release"))
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--archive", type=Path)
@@ -317,6 +442,8 @@ def main() -> None:
     elif args.command == "verify":
         verify(root, receipt, args.sdk_version)
         print("dotnet_sdk=ok")
+    elif args.command == "release":
+        release(root, receipt, args.sdk_version)
     else:
         rollback(root, receipt, args.sdk_version, remove_receipt=True)
         print("dotnet_sdk=removed-owned-files")

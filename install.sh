@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Rootless bootstrap for the locked Linux-to-iOS .NET toolchain.
+# User-invoked bootstrap for the locked Linux-to-iOS .NET toolchain.
 set -Eeuo pipefail
 umask 077
+
+((EUID != 0)) || {
+    printf 'do not run install.sh as root or through sudo; run it as the target user\n' >&2
+    exit 1
+}
 
 readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly lock_path="$script_dir/toolchain.lock.json"
@@ -21,13 +26,18 @@ Install options:
   --aot-pack PATH       Reuse a locally built LLVM AOT pack layout.
   --jobs COUNT          Runtime compiler build parallelism.
   --offline             Forbid external downloads; require complete caches.
-  --yes                 Do not prompt before canonical-root changes.
+  --yes                 Do not prompt before host-root or privilege changes.
   --dry-run             Print paths and planned operations without changing them.
 
-The canonical SDK root is ~/.dotnet. Durable components are installed below
-${XDG_DATA_HOME:-~/.local/share}/dotnet-ios-linux; downloads and builds are
-kept below ${XDG_CACHE_HOME:-~/.cache}/dotnet-ios-linux. Shell startup files,
-credentials, pairing records, devices, and signing state are never modified.
+The host SDK/workload root is resolved from the real dotnet command. Durable
+components are installed below ${XDG_DATA_HOME:-~/.local/share}/dotnet-ios-linux;
+downloads and builds are kept below ${XDG_CACHE_HOME:-~/.cache}/dotnet-ios-linux.
+Shell startup files, credentials, pairing records, devices, and signing state
+are never modified.
+
+The installer resolves the real host dotnet executable and uses its containing
+SDK/workload root. Do not run this complete script with sudo; it requests
+permission only for the constrained helper when the selected root is not writable.
 EOF
 }
 
@@ -90,21 +100,58 @@ if [[ -n "${XDG_CACHE_HOME:-}" && "$XDG_CACHE_HOME" != /* ]]; then
     exit 1
 fi
 
+need() { command -v "$1" >/dev/null || { printf 'required host command is missing: %s\n' "$1" >&2; exit 1; }; }
+
+sync_path_state() {
+    python3 - "$script_dir/eng/common" "$1" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from atomic import fsync_path_state
+fsync_path_state(Path(sys.argv[2]))
+PY
+}
+need realpath
+host_dotnet="$(command -v dotnet || true)"
+[[ -n "$host_dotnet" ]] || {
+    printf 'required host command is missing: dotnet\n' >&2
+    printf 'install a compatible .NET SDK and ensure dotnet is on PATH\n' >&2
+    exit 1
+}
+if ! dotnet_executable="$(realpath -e "$host_dotnet")"; then
+    printf 'cannot resolve the host dotnet executable: %s\n' "$host_dotnet" >&2
+    exit 1
+fi
+readonly dotnet_executable
+readonly dotnet_root="$(dirname "$dotnet_executable")"
 readonly data_root="${XDG_DATA_HOME:-$HOME/.local/share}/dotnet-ios-linux"
 readonly cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/dotnet-ios-linux"
-readonly dotnet_root="$HOME/.dotnet"
 readonly cache_marker="$cache_root/.dotnet-ios-linux-cache.json"
 readonly marker="$data_root/.dotnet-ios-linux.json"
 readonly receipt="$data_root/receipts/install.json"
 readonly sdk_receipt="$data_root/receipts/dotnet-sdk.json"
 readonly workload_transaction="$data_root/receipts/workload-transaction"
 readonly control_root="$data_root/control"
+readonly bundle_builder="$script_dir/eng/workload/build-workload-bundle.py"
+readonly system_helper_source="$script_dir/eng/install/system-workload-helper.py"
+readonly transaction_source="$script_dir/eng/install/workload-transaction.py"
+readonly atomic_source="$script_dir/eng/common/atomic.py"
+readonly system_helper_base="/usr/local/lib/dotnet-ios-linux/versions"
+readonly system_trust_base="/usr/local/share/dotnet-ios-linux/versions"
+system_helper_version=""
+installed_system_helper=""
+installed_transaction=""
+installed_atomic=""
+installed_trust_lock=""
 
 [[ ! -L "$data_root" ]] || { printf 'durable data root must not be a symlink: %s\n' "$data_root" >&2; exit 1; }
 [[ ! -L "$cache_root" ]] || { printf 'cache root must not be a symlink: %s\n' "$cache_root" >&2; exit 1; }
-[[ ! -L "$dotnet_root" ]] || { printf 'canonical SDK root must not be a symlink: %s\n' "$dotnet_root" >&2; exit 1; }
+[[ -x "$dotnet_executable" && "$dotnet_executable" == "$dotnet_root/dotnet" ]] || {
+    printf 'resolved host dotnet executable has an unsupported layout: %s\n' "$dotnet_executable" >&2
+    exit 1
+}
+[[ ! -L "$dotnet_root" ]] || { printf 'host SDK root must not be a symlink: %s\n' "$dotnet_root" >&2; exit 1; }
 
-need() { command -v "$1" >/dev/null || { printf 'required host command is missing: %s\n' "$1" >&2; exit 1; }; }
 for tool in python3 flock mktemp mv realpath sha256sum sha512sum; do need "$tool"; done
 python3 - <<'PY'
 import sys
@@ -168,6 +215,24 @@ readonly sdk_archive="$cache_root/downloads/${lock_values[sdk_archive]}"
 readonly manifest_archive="$cache_root/downloads/${lock_values[manifest_archive]}"
 readonly workload_set_archive="$cache_root/downloads/${lock_values[workload_package_archive]}"
 lock_sha256="$(sha256sum -b "$lock_path" | cut -d' ' -f1)"
+readonly current_system_helper_version="$(python3 - \
+    "$system_helper_source" "$transaction_source" "$atomic_source" "$lock_path" <<'PY'
+import hashlib, sys
+labels=(
+    "eng/install/system-workload-helper.py",
+    "eng/install/workload-transaction.py",
+    "eng/common/atomic.py",
+    "toolchain.lock.json",
+)
+value=hashlib.sha256()
+for label, raw in zip(labels, sys.argv[1:], strict=True):
+    value.update(label.encode("utf-8")+b"\0")
+    with open(raw,"rb") as stream:
+        for block in iter(lambda: stream.read(1024*1024),b""):
+            value.update(block)
+print(value.hexdigest())
+PY
+)"
 
 install_id=""
 sdk_version=""
@@ -184,6 +249,27 @@ platform_build=""
 xcode_sdk_version=""
 xcode_sdk_build=""
 recommended_xcode_version=""
+privilege_mode=""
+system_transaction_id=""
+workload_bundle=""
+system_helper_transaction_active=false
+workload_manifest=""
+user_root_lock_acquired=false
+shared_consumers=0
+declare -a bundle_package_paths=()
+
+set_system_helper_paths() {
+    local version="$1"
+    [[ "$version" =~ ^[0-9a-f]{64}$ ]] || {
+        printf 'invalid system helper version in installation context\n' >&2
+        return 1
+    }
+    system_helper_version="$version"
+    installed_system_helper="$system_helper_base/$version/eng/install/system-workload-helper.py"
+    installed_transaction="$system_helper_base/$version/eng/install/workload-transaction.py"
+    installed_atomic="$system_helper_base/$version/eng/common/atomic.py"
+    installed_trust_lock="$system_trust_base/$version/toolchain.lock.json"
+}
 
 set_install_paths() {
     install_id="$project_version-sdk-$sdk_version"
@@ -193,6 +279,39 @@ set_install_paths() {
 
 xcode_is_compatible() {
     "$context_resolver" xcode-compatible --actual "$1" --recommended "$2" >/dev/null
+}
+
+dotnet_root_requires_elevation() {
+    local path
+    [[ -w "$dotnet_root" ]] || return 0
+    for path in sdk sdk-manifests packs template-packs metadata; do
+        if [[ -e "$dotnet_root/$path" && ! -w "$dotnet_root/$path" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+resolve_privilege_mode() {
+    if dotnet_root_requires_elevation; then
+        privilege_mode="system-helper"
+        system_transaction_id="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+        set_system_helper_paths "$current_system_helper_version"
+        [[ "$sdk_source" != installer ]] || {
+            printf 'the non-writable host .NET root lacks a compatible SDK in feature band %s\n' \
+                "$sdk_feature_band" >&2
+            printf 'install a compatible SDK through the host package manager before continuing\n' >&2
+            return 1
+        }
+        [[ "$workload_set_version" == "$workload_fallback_version" ]] || {
+            printf 'system-root installation requires locked workload set %s, found %s\n' \
+                "$workload_fallback_version" "$workload_set_version" >&2
+            return 1
+        }
+    else
+        privilege_mode="user"
+        system_transaction_id=""
+    fi
 }
 
 resolve_new_install_context() {
@@ -205,7 +324,9 @@ resolve_new_install_context() {
         --manifest-suffix "$manifest_suffix" --fallback "$workload_fallback_version"
     workload_set_version="${install_context[workload_version]}"
     workload_source="${install_context[workload_source]}"
+    workload_manifest="$manifest_version/$manifest_suffix"
     set_install_paths
+    resolve_privilege_mode
 }
 
 load_owned_context() {
@@ -225,6 +346,29 @@ for key in required:
         raise SystemExit(f"installation context lacks {key}")
 for key in required:
     sys.stdout.buffer.write(key.encode()+b"\0"+value[key].encode()+b"\0")
+mode=value.get("privilegeMode","user")
+if mode not in ("user","system-helper"):
+    raise SystemExit("installation context has an invalid privilege mode")
+sys.stdout.buffer.write(b"privilegeMode\0"+mode.encode()+b"\0")
+transaction=value.get("systemTransactionId")
+if transaction is not None:
+    if not isinstance(transaction,str) or not transaction or "\x00" in transaction:
+        raise SystemExit("installation context has an invalid system transaction ID")
+    sys.stdout.buffer.write(b"systemTransactionId\0"+transaction.encode()+b"\0")
+helper=value.get("systemHelperVersion")
+if helper is not None:
+    if not isinstance(helper,str) or len(helper) != 64 or any(c not in "0123456789abcdef" for c in helper):
+        raise SystemExit("installation context has an invalid system helper version")
+    sys.stdout.buffer.write(b"systemHelperVersion\0"+helper.encode()+b"\0")
+manifest=value.get("workloadManifest")
+if manifest is not None:
+    if not isinstance(manifest,str) or not manifest or "\x00" in manifest:
+        raise SystemExit("installation context has an invalid workload manifest")
+    sys.stdout.buffer.write(b"workloadManifest\0"+manifest.encode()+b"\0")
+for key in ("sdkSource","workloadSource"):
+    item=value.get(key)
+    if isinstance(item,str) and item:
+        sys.stdout.buffer.write(key.encode()+b"\0"+item.encode()+b"\0")
 xcode=value.get("xcode",{})
 for key in ("version","build","sdkVersion","sdkBuild"):
     item=xcode.get(key)
@@ -244,8 +388,14 @@ PY
     install_id="${install_context[installId]}"
     sdk_version="${install_context[sdkVersion]}"
     workload_set_version="${install_context[workloadSet]}"
-    sdk_source="receipt"
-    workload_source="receipt"
+    sdk_source="${install_context[sdkSource]:-receipt}"
+    workload_source="${install_context[workloadSource]:-receipt}"
+    privilege_mode="${install_context[privilegeMode]}"
+    system_transaction_id="${install_context[systemTransactionId]:-}"
+    workload_manifest="${install_context[workloadManifest]:-$manifest_version/$manifest_suffix}"
+    if [[ "$privilege_mode" == system-helper ]]; then
+        set_system_helper_paths "${install_context[systemHelperVersion]:-}"
+    fi
     feed="$data_root/feeds/$install_id"
     toolchain="$data_root/toolchains/$install_id"
     xcode_version="${install_context[xcode.version]:-}"
@@ -262,6 +412,44 @@ try: value=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 except Exception as error: raise SystemExit(f"cannot read installation marker: {error}")
 if value.get("owner") != "dotnet-ios-linux": raise SystemExit("installation marker has a different owner")
 print(value.get("status", ""))
+PY
+}
+
+read_marker_phase() {
+    python3 - "$marker" <<'PY'
+import json, sys
+from pathlib import Path
+value=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if value.get("owner") != "dotnet-ios-linux":
+    raise SystemExit("installation marker has a different owner")
+print(value.get("uninstallPhase", ""))
+PY
+}
+
+set_marker_state() {
+    local expected_status="$1" new_status="$2" phase="$3"
+    python3 - "$marker" "$expected_status" "$new_status" "$phase" <<'PY'
+import json, os, sys, tempfile
+from pathlib import Path
+path=Path(sys.argv[1])
+value=json.loads(path.read_text(encoding="utf-8"))
+if value.get("owner") != "dotnet-ios-linux" or value.get("status") != sys.argv[2]:
+    raise SystemExit("installation marker changed during lifecycle transition")
+value["status"]=sys.argv[3]
+if sys.argv[4]: value["uninstallPhase"]=sys.argv[4]
+else: value.pop("uninstallPhase",None)
+descriptor,name=tempfile.mkstemp(prefix=f".{path.name}.",dir=path.parent)
+temporary=Path(name)
+try:
+    with os.fdopen(descriptor,"w",encoding="utf-8") as stream:
+        json.dump(value,stream,indent=2); stream.write("\n"); stream.flush(); os.fsync(stream.fileno())
+    os.replace(temporary,path)
+    directory=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+    try: os.fsync(directory)
+    finally: os.close(directory)
+except BaseException:
+    temporary.unlink(missing_ok=True)
+    raise
 PY
 }
 
@@ -322,9 +510,10 @@ activate_environment() {
 }
 
 doctor() {
-    local actual_sdk actual_workload actual_xcode actual_sdk_version swift_major_minor
+    local expected_status="${1:-complete}"
+    local actual_sdk actual_workload actual_xcode actual_sdk_version swift_major_minor helper_output
     [[ -f "$marker" && -f "$receipt" ]] || { printf 'dotnet-ios-linux is not installed under %s\n' "$data_root" >&2; return 1; }
-    [[ "$(read_marker_status)" == complete ]] || { printf 'installation is incomplete; rerun install\n' >&2; return 1; }
+    [[ "$(read_marker_status)" == "$expected_status" ]] || { printf 'installation is incomplete; rerun install\n' >&2; return 1; }
     python3 - "$receipt" "$lock_sha256" <<'PY'
 import json, sys
 from pathlib import Path
@@ -343,7 +532,31 @@ PY
             return 1
         }
     fi
-    "$script_dir/eng/install/workload-transaction.py" verify --root "$dotnet_root" --transaction "$workload_transaction" >/dev/null
+    if [[ "$privilege_mode" == system-helper ]]; then
+        install_system_helper
+        helper_output="$(run_system_helper verify \
+            --sdk-version "$sdk_version" --workload-version "$workload_set_version" \
+            --workload-manifest "$workload_manifest" \
+            --ownership-token "$system_transaction_id")"
+        grep -Fxq 'system_workload=ok' <<<"$helper_output" || {
+            printf 'system workload helper did not confirm the installation\n' >&2
+            return 1
+        }
+        grep -Fxq 'ios_installed=true' <<<"$helper_output" || {
+            printf 'the pinned ios workload is not installed\n' >&2
+            return 1
+        }
+        actual_workload="$(sed -n 's/^workload_set=//p' <<<"$helper_output")"
+    else
+        "$script_dir/eng/install/workload-transaction.py" verify \
+            --root "$dotnet_root" --transaction "$workload_transaction" >/dev/null
+        actual_workload="$(cd "$control_root" && "$dotnet_root/dotnet" workload --version)"
+        (cd "$control_root" && "$dotnet_root/dotnet" workload list) |
+            awk -v expected="$workload_manifest" \
+                '$1 == "ios" && $2 == expected { found=1 } END { exit !found }' || {
+            printf 'the pinned ios workload is not installed\n' >&2; return 1;
+        }
+    fi
     "$script_dir/eng/install/verify-workload-packages.py" --root "$dotnet_root" \
         --feed "$feed" --lock "$lock_path" --dotnet "$dotnet_root/dotnet" >/dev/null
     actual_sdk="$(cd "$control_root" && "$dotnet_root/dotnet" --version)"
@@ -351,15 +564,9 @@ PY
         printf 'selected .NET SDK is %s, expected installed SDK %s\n' "$actual_sdk" "$sdk_version" >&2
         return 1
     }
-    actual_workload="$(cd "$control_root" && "$dotnet_root/dotnet" workload --version)"
     [[ "$actual_workload" == "$workload_set_version" ]] || {
         printf 'selected workload set is %s, expected %s\n' "$actual_workload" "$workload_set_version" >&2
         return 1
-    }
-    (cd "$control_root" && "$dotnet_root/dotnet" workload list) |
-        awk -v expected="$manifest_version/$manifest_suffix" \
-            '$1 == "ios" && $2 == expected { found=1 } END { exit !found }' || {
-        printf 'the pinned ios workload is not installed\n' >&2; return 1;
     }
     "$dotnet_root/packs/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/$project_version/tools/mono-aot-cross" --version |
         grep -Eq "LLVM:[[:space:]]+yes\\($((llvm_major * 100))\\)" || {
@@ -404,6 +611,264 @@ confirm() {
     [[ "$answer" == y || "$answer" == Y || "$answer" == yes || "$answer" == YES ]] || exit 1
 }
 
+acquire_system_privilege() {
+    [[ "$privilege_mode" == system-helper ]] || return 0
+    local sudo_executable
+    sudo_executable="$(trusted_host_executable sudo)"
+    if "$sudo_executable" -n -v >/dev/null 2>&1; then
+        return
+    fi
+    [[ -t 0 ]] || {
+        printf 'system .NET root requires sudo, but no interactive terminal or cached authorization is available\n' >&2
+        return 1
+    }
+    printf 'The host .NET root %s requires elevated workload access.\n' "$dotnet_root"
+    printf 'Only its constrained bootstrap and the root-owned workload helper will use sudo.\n'
+    confirm "Authorize the constrained system workload helper?"
+    "$sudo_executable" -v
+}
+
+trusted_host_executable() {
+    local name="$1" candidate
+    candidate="$(command -v "$name" || true)"
+    [[ -n "$candidate" ]] || {
+        printf 'required host command is missing: %s\n' "$name" >&2
+        return 1
+    }
+    [[ -x /usr/bin/python3 ]] || {
+        printf 'privileged operations require /usr/bin/python3\n' >&2
+        return 1
+    }
+    /usr/bin/python3 -I - "$candidate" <<'PY'
+import os, stat, sys
+from pathlib import Path
+path=Path(sys.argv[1]).resolve(strict=True)
+current=Path("/")
+for part in path.parts[1:]:
+    current /= part
+    details=current.lstat()
+    if stat.S_ISLNK(details.st_mode) or details.st_uid != 0 or stat.S_IMODE(details.st_mode) & 0o022:
+        raise SystemExit(f"privileged executable path is not root-owned and immutable: {current}")
+details=path.stat()
+if not stat.S_ISREG(details.st_mode) or not os.access(path,os.X_OK):
+    raise SystemExit(f"privileged executable is not a regular executable: {path}")
+print(path)
+PY
+}
+
+trusted_installed_file() {
+    /usr/bin/python3 -I - "$1" <<'PY'
+import stat, sys
+from pathlib import Path
+path=Path(sys.argv[1])
+current=Path("/")
+for part in path.parts[1:]:
+    current /= part
+    details=current.lstat()
+    if stat.S_ISLNK(details.st_mode) or details.st_uid != 0 or stat.S_IMODE(details.st_mode) & 0o022:
+        raise SystemExit(1)
+if not stat.S_ISREG(path.stat().st_mode):
+    raise SystemExit(1)
+PY
+}
+
+validate_python_runtime_trust() {
+    /usr/bin/python3 -I - <<'PY'
+import os, stat, sys
+from pathlib import Path
+paths={Path(sys.executable).resolve(strict=True)}
+paths.update(Path(item).resolve(strict=True) for item in sys.path if item and Path(item).exists())
+for root in sorted(paths):
+    candidates=(root,) if root.is_file() else (root,*root.rglob("*"))
+    for path in candidates:
+        details=path.lstat()
+        if stat.S_ISLNK(details.st_mode):
+            target=path.resolve(strict=True)
+            details=target.stat()
+            path=target
+        if details.st_uid != 0 or stat.S_IMODE(details.st_mode) & 0o022:
+            raise SystemExit(f"privileged Python runtime path is not root-owned and immutable: {path}")
+PY
+}
+
+system_helper_matches_sources() {
+    local source destination
+    local -a pairs=(
+        "$system_helper_source" "$installed_system_helper"
+        "$transaction_source" "$installed_transaction"
+        "$atomic_source" "$installed_atomic"
+        "$lock_path" "$installed_trust_lock"
+    )
+    ((${#pairs[@]} % 2 == 0))
+    while ((${#pairs[@]})); do
+        source="${pairs[0]}"
+        destination="${pairs[1]}"
+        pairs=("${pairs[@]:2}")
+        [[ -f "$destination" && ! -L "$destination" ]] || return 1
+        trusted_installed_file "$destination" || return 1
+        [[ "$(sha256sum -b "$source" | cut -d' ' -f1)" == \
+           "$(sha256sum -b "$destination" | cut -d' ' -f1)" ]] || return 1
+    done
+}
+
+system_helper_is_trusted() {
+    local destination
+    for destination in "$installed_system_helper" "$installed_transaction" \
+        "$installed_atomic" "$installed_trust_lock"; do
+        [[ -f "$destination" && ! -L "$destination" ]] || return 1
+        trusted_installed_file "$destination" || return 1
+    done
+    /usr/bin/python3 -I - "$system_helper_version" "$installed_system_helper" \
+        "$installed_transaction" "$installed_atomic" "$installed_trust_lock" <<'PY'
+import hashlib, sys
+labels=(
+    "eng/install/system-workload-helper.py",
+    "eng/install/workload-transaction.py",
+    "eng/common/atomic.py",
+    "toolchain.lock.json",
+)
+value=hashlib.sha256()
+for label, raw in zip(labels,sys.argv[2:],strict=True):
+    value.update(label.encode("utf-8")+b"\0")
+    with open(raw,"rb") as stream:
+        for block in iter(lambda:stream.read(1024*1024),b""): value.update(block)
+if value.hexdigest() != sys.argv[1]: raise SystemExit(1)
+PY
+}
+
+install_system_helper() {
+    [[ "$privilege_mode" == system-helper ]] || return 0
+    acquire_system_privilege
+    local install_executable ln_executable rm_executable sudo_executable sync_executable
+    sudo_executable="$(trusted_host_executable sudo)"
+    sync_executable="$(trusted_host_executable sync)"
+    sync_system_helper_files() {
+        local path
+        for path in "$installed_transaction" "$installed_atomic" \
+            "$installed_trust_lock" "$installed_system_helper"; do
+            "$sudo_executable" -- "$sync_executable" -f "$path"
+            "$sudo_executable" -- "$sync_executable" -f "$(dirname "$path")"
+        done
+    }
+    if [[ "$system_helper_version" != "$current_system_helper_version" ]]; then
+        system_helper_is_trusted || {
+            printf 'installed helper version %s is unavailable or unsafe; use the matching checkout\n' \
+                "$system_helper_version" >&2
+            return 1
+        }
+        sync_system_helper_files
+        return
+    fi
+    if system_helper_matches_sources; then
+        sync_system_helper_files
+        return
+    fi
+    install_executable="$(trusted_host_executable install)"
+    ln_executable="$(trusted_host_executable ln)"
+    rm_executable="$(trusted_host_executable rm)"
+    [[ -x /usr/bin/python3 ]] || {
+        printf 'the privileged helper requires /usr/bin/python3\n' >&2
+        return 1
+    }
+    validate_python_runtime_trust
+    "$sudo_executable" -- "$install_executable" -d -o root -g root -m 0755 \
+        "$(dirname "$installed_system_helper")" "$(dirname "$installed_atomic")" \
+        "$(dirname "$installed_trust_lock")"
+    publish_system_file() {
+        local source="$1" destination="$2" mode="$3" stage
+        if [[ -e "$destination" ]]; then
+            [[ -f "$destination" && ! -L "$destination" ]] || return 1
+            [[ "$(sha256sum -b "$source" | cut -d' ' -f1)" == \
+               "$(sha256sum -b "$destination" | cut -d' ' -f1)" ]] || return 1
+            "$sudo_executable" -- "$sync_executable" -f "$destination"
+            "$sudo_executable" -- "$sync_executable" -f "$(dirname "$destination")"
+            return
+        fi
+        stage="$destination.stage.$UID.$BASHPID.$RANDOM"
+        "$sudo_executable" -- "$install_executable" -o root -g root -m "$mode" \
+            "$source" "$stage"
+        "$sudo_executable" -- "$sync_executable" -f "$stage"
+        if ! "$sudo_executable" -- "$ln_executable" -- "$stage" "$destination"; then
+            if [[ ! -f "$destination" || -L "$destination" ]]; then
+                "$sudo_executable" -- "$rm_executable" -f -- "$stage"
+                return 1
+            fi
+        fi
+        "$sudo_executable" -- "$sync_executable" -f "$(dirname "$destination")"
+        "$sudo_executable" -- "$rm_executable" -f -- "$stage"
+        "$sudo_executable" -- "$sync_executable" -f "$(dirname "$destination")"
+        [[ "$(sha256sum -b "$source" | cut -d' ' -f1)" == \
+           "$(sha256sum -b "$destination" | cut -d' ' -f1)" ]]
+    }
+    publish_system_file "$transaction_source" "$installed_transaction" 0644
+    publish_system_file "$atomic_source" "$installed_atomic" 0644
+    publish_system_file "$lock_path" "$installed_trust_lock" 0644
+    # Publish the executable last so the version is callable only after all of
+    # its immutable dependencies are visible.
+    publish_system_file "$system_helper_source" "$installed_system_helper" 0755
+    system_helper_matches_sources || {
+        printf 'installed system workload helper failed source integrity verification\n' >&2
+        return 1
+    }
+}
+
+run_system_helper() {
+    local action="$1"
+    shift
+    local sudo_executable
+    validate_python_runtime_trust
+    acquire_system_privilege
+    system_helper_is_trusted || {
+        printf 'installed system workload helper is unavailable or failed integrity validation\n' >&2
+        return 1
+    }
+    sudo_executable="$(trusted_host_executable sudo)"
+    "$sudo_executable" -- "$installed_system_helper" "$action" \
+        --root "$dotnet_root" --dotnet "$dotnet_executable" "$@"
+}
+
+print_shell_setup() {
+    local shell_name startup_file
+    shell_name="${SHELL:-}"
+    shell_name="${shell_name##*/}"
+    case "$shell_name" in
+        bash) startup_file="$HOME/.bashrc" ;;
+        zsh) startup_file="$HOME/.zshrc" ;;
+        *)
+            printf '\nTo make run-ios-app.sh available from any directory, add this line to your shell startup file:\n'
+            printf '  export PATH=%q:"$PATH"\n' "$script_dir"
+            printf 'Then reload that file or start a new shell.\n'
+            return
+            ;;
+    esac
+
+    printf '\nTo make run-ios-app.sh available from any directory in %s, add this line to %q:\n' \
+        "$shell_name" "$startup_file"
+    printf '  export PATH=%q:"$PATH"\n' "$script_dir"
+    printf 'Then reload %q:\n' "$startup_file"
+    printf '  source %q\n' "$startup_file"
+}
+
+acquire_user_root_lock() {
+    [[ "$privilege_mode" == user ]] || return 0
+    [[ "$user_root_lock_acquired" == false ]] || return 0
+    local root_lock="$dotnet_root/.dotnet-ios-linux.lifecycle.lock"
+    [[ ! -e "$root_lock" || -f "$root_lock" ]] || {
+        printf 'host .NET lifecycle lock is not a regular file: %s\n' "$root_lock" >&2
+        return 1
+    }
+    [[ ! -L "$root_lock" ]] || {
+        printf 'host .NET lifecycle lock must not be a symlink: %s\n' "$root_lock" >&2
+        return 1
+    }
+    exec 8>"$root_lock"
+    flock -n 8 || {
+        printf 'another workload lifecycle operation is active for %s\n' "$dotnet_root" >&2
+        return 1
+    }
+    user_root_lock_acquired=true
+}
+
 if [[ "$command_name" == install && "$dry_run" == true ]]; then
     [[ -n "$xcode_archive" ]] || { printf -- '--xcode-archive is required for install\n' >&2; exit 2; }
     [[ -f "$xcode_archive" ]] || { printf 'Xcode archive is not a file: %s\n' "$xcode_archive" >&2; exit 1; }
@@ -416,10 +881,13 @@ if [[ "$command_name" == install && "$dry_run" == true ]]; then
     cat <<EOF
 command=install
 dotnet_root=$dotnet_root
+dotnet_executable=$dotnet_executable
 dotnet_sdk=$sdk_version
 dotnet_sdk_source=$sdk_source
 workload_set=$workload_set_version
 workload_set_source=$workload_source
+privilege_mode=$privilege_mode
+sudo_required=$([[ "$privilege_mode" == system-helper ]] && printf true || printf false)
 data_root=$data_root
 cache_root=$cache_root
 xcode_archive=$(basename "$xcode_archive")
@@ -445,46 +913,113 @@ flock -n 9 || { printf 'another dotnet-ios-linux lifecycle operation is active\n
 if [[ "$command_name" == doctor ]]; then
     [[ -f "$receipt" ]] || { printf 'dotnet-ios-linux is not installed under %s\n' "$data_root" >&2; exit 1; }
     load_owned_context "$receipt"
+    acquire_user_root_lock
     doctor
     exit 0
 fi
 
 if [[ "$command_name" == uninstall ]]; then
     [[ -f "$marker" ]] || { printf 'dotnet-ios-linux is not installed\n'; exit 0; }
-    [[ "$(read_marker_status)" == complete ]] || {
+    marker_status="$(read_marker_status)"
+    [[ "$marker_status" == complete || "$marker_status" == uninstalling ]] || {
         printf 'installation is incomplete; rerun install to recover it before uninstalling\n' >&2
         exit 1
     }
     [[ -f "$receipt" ]] || { printf 'installation receipt is missing: %s\n' "$receipt" >&2; exit 1; }
     load_owned_context "$receipt"
+    acquire_user_root_lock
     confirm "Remove the owned iOS workload and durable dotnet-ios-linux data?"
-    "$script_dir/eng/install/durable-assets.py" verify --root "$data_root" --receipt "$receipt"
-    activate_environment
-    transaction_status="$("$script_dir/eng/install/workload-transaction.py" status \
-        --root "$dotnet_root" --transaction "$workload_transaction")"
-    if [[ "$transaction_status" == committed ]]; then
-        "$script_dir/eng/install/workload-transaction.py" prepare-uninstall \
-            --root "$dotnet_root" --transaction "$workload_transaction"
-    elif [[ "$transaction_status" != uninstalling ]]; then
-        printf 'cannot uninstall a workload transaction in state %s\n' "$transaction_status" >&2
-        exit 1
-    fi
-    if ! (cd "$control_root" && "$dotnet_root/dotnet" workload uninstall ios); then
-        if (cd "$control_root" && "$dotnet_root/dotnet" workload list) | grep -Eq '^ios[[:space:]]'; then
-            printf 'workload uninstall failed while ios remains installed; no snapshots were restored\n' >&2
+    if [[ "$marker_status" == complete ]]; then
+        "$script_dir/eng/install/durable-assets.py" verify --root "$data_root" --receipt "$receipt"
+        set_marker_state complete uninstalling prepared
+        uninstall_phase=prepared
+    else
+        uninstall_phase="$(read_marker_phase)"
+        [[ "$uninstall_phase" =~ ^(prepared|workload-removed|sdk-removed|assets-removed)$ ]] || {
+            printf 'installation has an invalid uninstall phase: %s\n' "$uninstall_phase" >&2
             exit 1
+        }
+    fi
+    activate_environment
+    if [[ "$uninstall_phase" == prepared ]]; then
+        if [[ "$privilege_mode" == system-helper ]]; then
+            install_system_helper
+            run_system_helper uninstall \
+                --sdk-version "$sdk_version" --workload-version "$workload_set_version" \
+                --workload-manifest "$workload_manifest" \
+                --ownership-token "$system_transaction_id"
+        else
+            transaction_status="$("$script_dir/eng/install/workload-transaction.py" status \
+                --root "$dotnet_root" --transaction "$workload_transaction")"
+            if [[ "$transaction_status" == committed ]]; then
+                "$script_dir/eng/install/workload-transaction.py" prepare-uninstall \
+                    --root "$dotnet_root" --transaction "$workload_transaction"
+            elif [[ "$transaction_status" != uninstalling && "$transaction_status" != restoring && \
+                    "$transaction_status" != restored ]]; then
+                printf 'cannot uninstall a workload transaction in state %s\n' "$transaction_status" >&2
+                exit 1
+            fi
+            if [[ "$transaction_status" != restored ]]; then
+                "$script_dir/eng/install/workload-transaction.py" restore-retain \
+                    --root "$dotnet_root" --transaction "$workload_transaction"
+            fi
         fi
-        printf 'workload uninstall returned an error after ios was removed; continuing ownership restoration\n' >&2
+        set_marker_state uninstalling uninstalling workload-removed
+        uninstall_phase=workload-removed
     fi
-    "$script_dir/eng/install/workload-transaction.py" restore \
-        --root "$dotnet_root" --transaction "$workload_transaction"
-    if [[ -f "$sdk_receipt" ]]; then
-        "$script_dir/eng/install/install-dotnet-sdk.py" uninstall \
-            --root "$dotnet_root" --receipt "$sdk_receipt" --sdk-version "$sdk_version"
+    if [[ "$uninstall_phase" == workload-removed ]]; then
+        if [[ "$privilege_mode" == user && -d "$workload_transaction" ]]; then
+            shared_consumers="$("$script_dir/eng/install/workload-transaction.py" shared-consumers \
+                --root "$dotnet_root" --transaction "$workload_transaction")"
+        fi
+        if [[ -f "$sdk_receipt" ]]; then
+            if ((shared_consumers > 0)); then
+                "$script_dir/eng/install/install-dotnet-sdk.py" release \
+                    --root "$dotnet_root" --receipt "$sdk_receipt" --sdk-version "$sdk_version"
+            else
+                "$script_dir/eng/install/install-dotnet-sdk.py" uninstall \
+                    --root "$dotnet_root" --receipt "$sdk_receipt" --sdk-version "$sdk_version"
+            fi
+        else
+            sync_path_state "$sdk_receipt"
+        fi
+        set_marker_state uninstalling uninstalling sdk-removed
+        uninstall_phase=sdk-removed
     fi
-    "$script_dir/eng/install/durable-assets.py" uninstall --root "$data_root" --receipt "$receipt"
-    rm -f -- "$marker" "$receipt"
-    rmdir "$data_root/receipts" "$data_root" 2>/dev/null || true
+    if [[ "$uninstall_phase" == sdk-removed ]]; then
+        "$script_dir/eng/install/durable-assets.py" uninstall --allow-missing \
+            --root "$data_root" --receipt "$receipt"
+        set_marker_state uninstalling uninstalling assets-removed
+        uninstall_phase=assets-removed
+    fi
+    if [[ "$uninstall_phase" == assets-removed && "$privilege_mode" == user ]]; then
+        "$script_dir/eng/install/workload-transaction.py" finalize \
+            --root "$dotnet_root" --transaction "$workload_transaction"
+    fi
+    python3 - "$script_dir/eng/common" "$marker" "$receipt" \
+        "$data_root/receipts" "$data_root" <<'PY'
+import errno, os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from atomic import fsync_directory, fsync_path_state
+for raw in sys.argv[2:4]:
+    path=Path(raw)
+    if os.path.lexists(path):
+        path.unlink()
+        fsync_directory(path.parent)
+    else:
+        fsync_path_state(path)
+for raw in sys.argv[4:]:
+    path=Path(raw)
+    try:
+        path.rmdir()
+        fsync_directory(path.parent)
+    except FileNotFoundError:
+        fsync_path_state(path)
+    except OSError as error:
+        if error.errno not in {errno.ENOTEMPTY, errno.EEXIST}:
+            raise
+PY
     if [[ "$purge_cache" == true ]]; then
         validate_cache_root
         rm -rf -- "$cache_root"
@@ -497,6 +1032,7 @@ fi
 if [[ -f "$marker" && "$(read_marker_status)" == complete ]]; then
     [[ -f "$receipt" ]] || { printf 'installation receipt is missing: %s\n' "$receipt" >&2; exit 1; }
     load_owned_context "$receipt"
+    acquire_user_root_lock
     doctor
     exit 0
 fi
@@ -517,22 +1053,36 @@ if [[ -e "$data_root" ]]; then
         doctor
         exit 0
     fi
-    [[ "$status" == installing ]] || { printf 'unknown installation state: %s\n' "$status" >&2; exit 1; }
+    [[ "$status" == installing || "$status" == verifying ]] || {
+        printf 'unknown installation state: %s\n' "$status" >&2
+        exit 1
+    }
     if ! load_owned_context "$marker"; then
         printf 'interrupted installation lacks a reusable context; resolving it again\n' >&2
         resolve_new_install_context
     fi
+    acquire_user_root_lock
     printf 'Recovering an interrupted installation...\n'
-    if [[ -d "$workload_transaction" ]]; then
+    if [[ "$privilege_mode" == system-helper ]]; then
+        install_system_helper
+        run_system_helper recover --ownership-token "$system_transaction_id"
+    elif [[ -d "$workload_transaction" ]]; then
         "$script_dir/eng/install/workload-transaction.py" restore --root "$dotnet_root" --transaction "$workload_transaction"
     fi
     if [[ -f "$sdk_receipt" ]]; then
         "$script_dir/eng/install/install-dotnet-sdk.py" uninstall --root "$dotnet_root" \
             --receipt "$sdk_receipt" --sdk-version "$sdk_version"
+    else
+        sync_path_state "$sdk_receipt"
     fi
     rm -rf -- "$data_root"
+    # The recovered receipt may refer to an older content-addressed helper and
+    # ownership token. Resolve a new context before starting a new transaction.
+    resolve_new_install_context
+    acquire_user_root_lock
 else
     resolve_new_install_context
+    acquire_user_root_lock
 fi
 
 for tool in clang clang++ cmake curl file git ldd ln make ninja objcopy readelf strip tar; do need "$tool"; done
@@ -567,34 +1117,82 @@ fi
 
 mkdir -p "$data_root/receipts" "$cache_root/downloads" "$cache_root/build" "$cache_root/sources" \
     "$cache_root/nuget/packages" "$cache_root/dotnet-cli-home" "$data_root/feeds" "$data_root/toolchains"
+python3 - "$script_dir/eng/common" "$data_root" "$data_root/receipts" \
+    "$data_root/feeds" "$data_root/toolchains" "$cache_root" "$cache_root/downloads" \
+    "$cache_root/build" "$cache_root/sources" "$cache_root/nuget" \
+    "$cache_root/nuget/packages" "$cache_root/dotnet-cli-home" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from atomic import fsync_path_state
+for raw in sys.argv[2:]:
+    fsync_path_state(Path(raw))
+PY
 python3 - "$marker" "$lock_sha256" "$dotnet_root" "$data_root" "$project_version" \
-    "$install_id" "$sdk_version" "$workload_set_version" <<'PY'
-import json, os, sys
+    "$install_id" "$sdk_version" "$workload_set_version" "$privilege_mode" \
+    "$system_transaction_id" "$sdk_source" "$workload_source" "$workload_manifest" \
+    "$system_helper_version" <<'PY'
+import json, os, sys, tempfile
 from pathlib import Path
 path=Path(sys.argv[1])
 value={
  "schemaVersion":1,"owner":"dotnet-ios-linux","status":"installing",
  "projectVersion":sys.argv[5],"installId":sys.argv[6],
  "sdkVersion":sys.argv[7],"workloadSet":sys.argv[8],
+ "privilegeMode":sys.argv[9],
+ "sdkSource":sys.argv[11],"workloadSource":sys.argv[12],
+ "workloadManifest":sys.argv[13],
  "toolchainLockSha256":sys.argv[2],"dotnetRoot":sys.argv[3],"dataRoot":sys.argv[4],
 }
-temporary=path.with_name(path.name+f".tmp.{os.getpid()}")
-temporary.write_text(json.dumps(value,indent=2)+"\n",encoding="utf-8"); os.replace(temporary,path)
+if sys.argv[10]: value["systemTransactionId"]=sys.argv[10]
+if sys.argv[14]: value["systemHelperVersion"]=sys.argv[14]
+descriptor,name=tempfile.mkstemp(prefix=f".{path.name}.",dir=path.parent)
+temporary=Path(name)
+try:
+    with os.fdopen(descriptor,"w",encoding="utf-8") as stream:
+        json.dump(value,stream,indent=2); stream.write("\n"); stream.flush(); os.fsync(stream.fileno())
+    os.replace(temporary,path)
+    directory=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+    try: os.fsync(directory)
+    finally: os.close(directory)
+except BaseException:
+    temporary.unlink(missing_ok=True)
+    raise
 PY
 installation_active=true
 rollback_install() {
-    local exit_code="${1:-$?}"
+    local exit_code="${1:-$?}" rollback_complete=true
     trap - ERR INT TERM
     [[ "$installation_active" == true ]] || exit "$exit_code"
     printf 'Installation failed; restoring owned mutations...\n' >&2
-    if [[ -d "$workload_transaction" ]]; then
-        "$script_dir/eng/install/workload-transaction.py" restore --root "$dotnet_root" --transaction "$workload_transaction" || true
+    if [[ "$privilege_mode" == system-helper ]]; then
+        if [[ "$system_helper_transaction_active" == true ]] && system_helper_is_trusted; then
+            run_system_helper recover --ownership-token "$system_transaction_id" || rollback_complete=false
+        elif [[ "$system_helper_transaction_active" == true ]]; then
+            rollback_complete=false
+            printf 'system workload helper is unavailable; preserving recovery state\n' >&2
+        fi
+    elif [[ -d "$workload_transaction" ]]; then
+        if ! "$script_dir/eng/install/workload-transaction.py" restore-retain \
+            --root "$dotnet_root" --transaction "$workload_transaction"; then
+            rollback_complete=false
+        fi
     fi
     if [[ -f "$sdk_receipt" ]]; then
-        "$script_dir/eng/install/install-dotnet-sdk.py" uninstall --root "$dotnet_root" \
-            --receipt "$sdk_receipt" --sdk-version "$sdk_version" || true
+        if ! "$script_dir/eng/install/install-dotnet-sdk.py" uninstall --root "$dotnet_root" \
+            --receipt "$sdk_receipt" --sdk-version "$sdk_version"; then
+            rollback_complete=false
+        fi
     fi
-    [[ ! -f "$marker" ]] || rm -rf -- "$data_root"
+    if [[ "$rollback_complete" == true ]]; then
+        [[ ! -f "$marker" ]] || rm -rf -- "$data_root"
+    else
+        if [[ "$privilege_mode" == system-helper ]]; then
+            printf 'privileged recovery is incomplete; durable receipts were preserved under %s\n' "$data_root" >&2
+        else
+            printf 'rollback is incomplete; durable receipts were preserved under %s\n' "$data_root" >&2
+        fi
+    fi
     exit "$exit_code"
 }
 trap rollback_install ERR INT TERM
@@ -603,8 +1201,32 @@ if [[ "$sdk_source" == installer ]]; then
     download_verified "$sdk_url" sha512sum "$sdk_sha512" "$sdk_archive" "$offline"
 fi
 download_verified "$manifest_url" sha512sum "$manifest_sha512" "$manifest_archive" "$offline"
-if [[ "$workload_source" == installer ]]; then
+if [[ "$workload_source" == installer || "$privilege_mode" == system-helper ]]; then
     download_verified "$workload_set_url" sha512sum "$workload_set_sha512" "$workload_set_archive" "$offline"
+fi
+if [[ "$privilege_mode" == system-helper ]]; then
+    bundle_plan="$(mktemp "${TMPDIR:-/tmp}/dotnet-ios-linux-bundle-plan.XXXXXX")"
+    if ! "$bundle_builder" plan --lock "$lock_path" --format null > "$bundle_plan"; then
+        rm -f -- "$bundle_plan"
+        false
+    fi
+    mapfile -d '' -t bundle_values < "$bundle_plan"
+    rm -f -- "$bundle_plan"
+    ((${#bundle_values[@]} > 0 && ${#bundle_values[@]} % 3 == 0)) || {
+        printf 'workload bundle planner returned an invalid response\n' >&2
+        false
+    }
+    readonly bundle_package_cache="$cache_root/downloads/workload-bundle-packages"
+    mkdir -p "$bundle_package_cache"
+    while ((${#bundle_values[@]})); do
+        bundle_filename="${bundle_values[0]}"
+        bundle_url="${bundle_values[1]}"
+        bundle_sha256="${bundle_values[2]}"
+        bundle_values=("${bundle_values[@]:3}")
+        bundle_path="$bundle_package_cache/$bundle_filename"
+        download_verified "$bundle_url" sha256sum "$bundle_sha256" "$bundle_path" "$offline"
+        bundle_package_paths+=("$bundle_path")
+    done
 fi
 python3 - "$manifest_archive" "$manifest_sha512_base64" <<'PY'
 import base64,hashlib,sys
@@ -633,8 +1255,11 @@ PY
 activate_environment
 [[ "$(cd "$control_root" && "$dotnet_root/dotnet" --version)" == "$sdk_version" ]]
 nuget_verify=("$manifest_archive")
-if [[ "$workload_source" == installer ]]; then
+if [[ "$workload_source" == installer || "$privilege_mode" == system-helper ]]; then
     nuget_verify+=("$workload_set_archive")
+fi
+if [[ "$privilege_mode" == system-helper ]]; then
+    nuget_verify+=("${bundle_package_paths[@]}")
 fi
 NUGET_CERT_REVOCATION_MODE=offline "$dotnet_root/dotnet" nuget verify --all "${nuget_verify[@]}" >/dev/null
 
@@ -669,6 +1294,13 @@ fi
 
 "$script_dir/eng/workload/build-local-feed.py" --official-manifest "$manifest_archive" \
     --aot-pack "$aot_pack" --output "$feed"
+if [[ "$privilege_mode" == system-helper ]]; then
+    mkdir -p "$cache_root/workload-bundles"
+    workload_bundle="$cache_root/workload-bundles/$install_id.tar"
+    "$bundle_builder" build --lock "$lock_path" --feed "$feed" \
+        --workload-set "$workload_set_archive" --package-cache "$bundle_package_cache" \
+        --output "$workload_bundle"
+fi
 
 sdk_output="$data_root/apple-sdk/iPhoneOS$xcode_sdk_version.sdk"
 if [[ ! -f "$sdk_output/.dotnet-ios-linux-sdk.json" ]]; then
@@ -713,15 +1345,26 @@ if [[ -e "$dotnet_root/metadata/workloads/$sdk_feature_band/InstalledWorkloads/i
     printf 'an ios workload already exists without this installer ownership; refusing to replace it\n' >&2
     false
 fi
-"$script_dir/eng/install/workload-transaction.py" begin --root "$dotnet_root" --transaction "$workload_transaction"
-mkdir -p "$cache_root/workload-temp"
-(cd "$control_root" && "$dotnet_root/dotnet" workload update \
-    --configfile "$feed/NuGet.Config" --disable-parallel --temp-dir "$cache_root/workload-temp" --verbosity minimal)
-(cd "$control_root" && "$dotnet_root/dotnet" workload install ios \
-    --configfile "$feed/NuGet.Config" --disable-parallel --temp-dir "$cache_root/workload-temp" --verbosity minimal)
-(cd "$control_root" && "$dotnet_root/dotnet" workload list) |
-    awk -v expected="$manifest_version/$manifest_suffix" \
-        '$1 == "ios" && $2 == expected { found=1 } END { exit !found }'
+if [[ "$privilege_mode" == system-helper ]]; then
+    install_system_helper
+    system_helper_transaction_active=true
+    run_system_helper install \
+        --sdk-version "$sdk_version" --workload-version "$workload_set_version" \
+        --workload-manifest "$workload_manifest" \
+        --ownership-token "$system_transaction_id" --bundle "$workload_bundle"
+else
+    "$script_dir/eng/install/workload-transaction.py" begin --root "$dotnet_root" \
+        --transaction "$workload_transaction" --package-inventory "$lock_path" \
+        --sdk-feature-band "$sdk_feature_band" --workload-version "$workload_set_version" \
+        --workload-manifest "$workload_manifest" --workload-id ios \
+        --control-global-json "$control_root/global.json"
+    mkdir -p "$cache_root/workload-temp"
+    (cd "$control_root" && "$dotnet_root/dotnet" workload install ios \
+        --configfile "$feed/NuGet.Config" --disable-parallel --temp-dir "$cache_root/workload-temp" --verbosity minimal)
+    (cd "$control_root" && "$dotnet_root/dotnet" workload list) |
+        awk -v expected="$workload_manifest" \
+            '$1 == "ios" && $2 == expected { found=1 } END { exit !found }'
+fi
 [[ -x "$dotnet_root/packs/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/$project_version/tools/mono-aot-cross" ]]
 "$script_dir/eng/install/verify-workload-packages.py" --root "$dotnet_root" \
     --feed "$feed" --lock "$lock_path" \
@@ -733,13 +1376,18 @@ xcode_is_compatible "$xcode_version" "$recommended_xcode_version" || {
         "$xcode_version" "$manifest_version" "$recommended_xcode_version" >&2
     false
 }
-"$script_dir/eng/install/workload-transaction.py" commit --root "$dotnet_root" --transaction "$workload_transaction"
+if [[ "$privilege_mode" == user ]]; then
+    "$script_dir/eng/install/workload-transaction.py" commit \
+        --root "$dotnet_root" --transaction "$workload_transaction"
+fi
 
 python3 - "$receipt" "$lock_sha256" "$dotnet_root" "$data_root" "$cache_root" \
     "$project_version" "$install_id" "$sdk_version" "$sdk_source" "$workload_set_version" \
     "$manifest_version" "$xcode_version" "$xcode_build" "$xcode_sdk_version" \
-    "$xcode_sdk_build" "$xcode_archive_sha256" "$locked_xcode_sha256" <<'PY'
-import json, os, sys
+    "$xcode_sdk_build" "$xcode_archive_sha256" "$locked_xcode_sha256" \
+    "$privilege_mode" "$system_transaction_id" "$workload_source" \
+    "$workload_manifest" "$system_helper_version" <<'PY'
+import json, os, sys, tempfile
 from pathlib import Path
 receipt=Path(sys.argv[1])
 value={
@@ -748,31 +1396,38 @@ value={
  "toolchainLockSha256":sys.argv[2],"dotnetRoot":sys.argv[3],"dataRoot":sys.argv[4],
  "cacheRoot":sys.argv[5],"sdkVersion":sys.argv[8],"sdkSource":sys.argv[9],
  "workloadSet":sys.argv[10],"workloadId":"ios","manifestVersion":sys.argv[11],
+ "privilegeMode":sys.argv[18],
+ "workloadSource":sys.argv[20],
+ "workloadManifest":sys.argv[21],
  "xcode":{"version":sys.argv[12],"build":sys.argv[13],"sdkVersion":sys.argv[14],
           "sdkBuild":sys.argv[15],"archiveSha256":sys.argv[16],
           "matchesLockedArchive":sys.argv[16] == sys.argv[17]},
  "credentialsStored":False,"pairingRecordsStored":False,"deviceIdentifiersStored":False,
 }
+if sys.argv[19]: value["systemTransactionId"]=sys.argv[19]
+if sys.argv[22]: value["systemHelperVersion"]=sys.argv[22]
 receipt.parent.mkdir(parents=True,exist_ok=True)
-temporary=receipt.with_name(receipt.name+f".tmp.{os.getpid()}")
-temporary.write_text(json.dumps(value,indent=2)+"\n",encoding="utf-8"); os.replace(temporary,receipt)
+descriptor,name=tempfile.mkstemp(prefix=f".{receipt.name}.",dir=receipt.parent)
+temporary=Path(name)
+try:
+    with os.fdopen(descriptor,"w",encoding="utf-8") as stream:
+        json.dump(value,stream,indent=2); stream.write("\n"); stream.flush(); os.fsync(stream.fileno())
+    os.replace(temporary,receipt)
+    directory=os.open(receipt.parent,os.O_RDONLY|os.O_DIRECTORY)
+    try: os.fsync(directory)
+    finally: os.close(directory)
+except BaseException:
+    temporary.unlink(missing_ok=True)
+    raise
 PY
 "$script_dir/eng/install/durable-assets.py" record --root "$data_root" --receipt "$receipt"
-python3 - "$marker" <<'PY'
-import json, os, sys
-from pathlib import Path
-path=Path(sys.argv[1])
-value=json.loads(path.read_text(encoding="utf-8"))
-if value.get("owner") != "dotnet-ios-linux" or value.get("status") != "installing":
-    raise SystemExit("installation marker changed during finalization")
-value["status"]="complete"
-temporary=path.with_name(path.name+f".tmp.{os.getpid()}")
-temporary.write_text(json.dumps(value,indent=2)+"\n",encoding="utf-8"); os.replace(temporary,path)
-PY
-if ! doctor; then
+set_marker_state installing verifying ""
+if ! doctor verifying; then
     rollback_install 1
 fi
+set_marker_state verifying complete ""
 installation_active=false
 trap - ERR INT TERM
 printf 'install=passed\n'
 printf 'Run: source %q\n' "$data_root/activate"
+print_shell_setup

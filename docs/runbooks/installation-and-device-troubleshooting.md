@@ -28,7 +28,7 @@ receipts to bypass a failure.
    A top-level installation deliberately requires the original XIP layout.
 3. Run `./install.sh doctor` only after a completed install. For an interrupted
    transaction, retain the local diagnostics and re-run the supported install
-   command; do not delete files under `~/.dotnet` opportunistically.
+   command; do not delete files under the selected host .NET root opportunistically.
 4. If using `--offline`, confirm that every pinned archive and source checkout
    is already in the project cache. Offline mode intentionally fails rather than
    downloading or substituting versions.
@@ -36,19 +36,58 @@ receipts to bypass a failure.
 The installer may reuse a newer installed SDK patch within the supported feature
 band. It does not cross feature bands. It also selects only an installed workload
 set whose iOS mapping matches the locked runtime/AOT graph; a newer incompatible
-workload set is not silently substituted.
+workload set is not silently substituted. These reuse rules apply to writable
+roots. A non-writable package-manager root must already have a compatible SDK
+and may select only the lock's exact workload-set version. The installer does
+not merge an SDK fallback into that root; if the exact workload set is absent,
+its locked package is installed from the verified local-only helper bundle.
 
 ## `dotnet` or MSBuild selects the wrong SDK
 
 1. Source the generated activation file in the shell that runs the command.
-2. Confirm `DOTNET_ROOT` resolves to `~/.dotnet` and `DEVELOPER_DIR` resolves to
-   the installed synthetic Xcode developer directory.
+2. Confirm `DOTNET_ROOT` matches the root containing
+   `realpath "$(command -v dotnet)"` recorded by the installation receipt, and
+   `DEVELOPER_DIR` resolves to the installed synthetic Xcode developer directory.
 3. Remove stale `MSBuildSDKsPath` or architecture-specific `DOTNET_ROOT_*`
    overrides from the invoking environment instead of adding a second SDK root.
 4. Run `./install.sh doctor` and retain a sanitized copy of the failure details.
 
-The installer intentionally leaves `/usr/share/dotnet` untouched. A system
-`dotnet` on `PATH` is not evidence that the Linux iOS workload is active.
+The active host `dotnet` determines the participating root. A package-manager
+root such as `/usr/share/dotnet` is changed only through the constrained helper
+after explicit authorization. A `dotnet` command on `PATH` is not by itself
+evidence that the Linux iOS workload is active; use `doctor`.
+
+## A system-root operation requests or loses privilege
+
+1. Never rerun the complete installer through `sudo`; it intentionally rejects
+   effective UID 0.
+2. Confirm the resolved `dotnet` executable and root printed by `--dry-run` are
+   the intended package-manager installation.
+3. A non-writable root must already contain a compatible SDK. Install or update
+   that SDK through the host's normal administration process before retrying.
+4. The installer downloads and verifies the full workload bundle before asking
+   for privilege. If offline preparation fails, populate the user cache rather
+   than allowing the privileged helper network access.
+5. If recovery reports an ownership-token mismatch, do not edit either receipt.
+   Use the same user's durable installation data that initiated the transaction.
+6. Preserve `/var/lib/dotnet-ios-linux` after an interrupted privileged action.
+   Re-running the same install command uses the receipt-bound token and the
+   root-owned journal to recover. Manual deletion loses supported recovery.
+
+If uninstall is interrupted, rerun the same `./install.sh uninstall` command.
+The durable marker records workload, SDK, and asset-removal phases; already
+removed receipt-owned assets are accepted only after the initial complete
+preflight was journaled.
+
+The helper validates root ownership, uses a root-scoped lock, and starts each
+privileged `dotnet` command in an isolated network namespace. Failure to create
+that namespace is a hard stop, not a reason to permit network access.
+The child inherits the lifecycle lock, so recovery waits if the helper is killed
+while `dotnet` is still running. Workload restoration is cursor-journaled and
+resumable; do not remove transaction directories or `.dotnet-ios-linux-*`
+tombstones manually. Teardown does not call broad `dotnet workload uninstall`:
+it restores only recorded paths and the private control key, retaining exact
+shared resources when another recorded global JSON selects the same set.
 
 ## Signing or installation fails
 
@@ -80,8 +119,15 @@ Use the direct procedures in
 Rider evaluation/build, stock `uno-check`, minimal Uno device execution, and
 native debugging remain separate unpassed gates. Use the activated CLI workflow
 as the diagnostic baseline. If experimenting with Rider, it must select
-`~/.dotnet/dotnet` and inherit the activation environment; do not represent that
-configuration as supported until its consumer receipt is published.
+the receipt-bound `DOTNET_ROOT/dotnet` and inherit the activation environment;
+do not represent that configuration as supported until its consumer receipt is
+published.
+
+Stock Rider on Linux does not expose locally connected iPhones through its iOS
+device selector and cannot provide Rider-managed iOS run/debug without a macOS
+host. Use the repository-root `run-ios-app.sh` candidate for explicit Linux USB
+build/sign/install/launch testing. It does not attach a debugger, and a passing
+run must still be captured as a separate sanitized consumer receipt.
 
 ## Reporting a problem safely
 

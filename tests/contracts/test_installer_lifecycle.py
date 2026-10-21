@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import fcntl
 import importlib.util
 import json
 import os
@@ -12,6 +13,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -22,6 +24,7 @@ ACTIVATION_WRITER = REPOSITORY / "eng" / "install" / "write-activation.py"
 DOWNLOAD_HELPER = REPOSITORY / "eng" / "install" / "download-verified.sh"
 TOP_LEVEL_INSTALLER = REPOSITORY / "install.sh"
 CONTEXT_RESOLVER = REPOSITORY / "eng" / "install" / "resolve-install-context.py"
+SYSTEM_WORKLOAD_HELPER = REPOSITORY / "eng" / "install" / "system-workload-helper.py"
 TEST_SDK_VERSION = "10.0.402"
 
 
@@ -133,6 +136,63 @@ class DotnetSdkMergeContracts(unittest.TestCase):
         self.assertTrue(all(path.exists() for path in created))
         self.assertEqual("user change\n", changed.read_text())
 
+    def test_forged_receipt_path_cannot_escape_dotnet_root(self) -> None:
+        self.install()
+        receipt = json.loads(self.receipt.read_text(encoding="utf-8"))
+        receipt["createdFiles"][0]["path"] = "../../../outside"
+        self.receipt.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
+        with self.assertRaises(SystemExit):
+            self.installer.rollback(
+                self.root.absolute(), self.receipt.absolute(), TEST_SDK_VERSION, remove_receipt=True
+            )
+
+        self.assertTrue(self.receipt.exists())
+
+    def test_rollback_replays_an_unlink_that_preceded_parent_fsync(self) -> None:
+        self.install()
+        original = self.installer.fsync_directory
+        interrupted = False
+
+        def fail_once(path):
+            nonlocal interrupted
+            if not interrupted:
+                interrupted = True
+                raise RuntimeError("simulated power loss before parent fsync")
+            return original(path)
+
+        with mock.patch.object(self.installer, "fsync_directory", side_effect=fail_once):
+            with self.assertRaises(RuntimeError):
+                self.installer.rollback(
+                    self.root.absolute(),
+                    self.receipt.absolute(),
+                    TEST_SDK_VERSION,
+                    remove_receipt=True,
+                )
+
+        self.installer.rollback(
+            self.root.absolute(),
+            self.receipt.absolute(),
+            TEST_SDK_VERSION,
+            remove_receipt=True,
+        )
+        self.assertFalse(self.receipt.exists())
+        self.assertFalse((self.root / "sdk/10.0.402").exists())
+
+    def test_release_relinquishes_receipt_but_preserves_shared_sdk_files(self) -> None:
+        self.install()
+        created = [
+            self.root / item["path"]
+            for item in json.loads(self.receipt.read_text(encoding="utf-8"))["createdFiles"]
+        ]
+
+        self.installer.release(
+            self.root.absolute(), self.receipt.absolute(), TEST_SDK_VERSION
+        )
+
+        self.assertFalse(self.receipt.exists())
+        self.assertTrue(all(path.is_file() for path in created))
+
 
 class WorkloadTransactionContracts(unittest.TestCase):
     def setUp(self) -> None:
@@ -140,6 +200,20 @@ class WorkloadTransactionContracts(unittest.TestCase):
         self.base = Path(self.temporary.name)
         self.root = self.base / "dotnet"
         self.transaction = self.base / "receipt" / "workload-transaction"
+        self.package_inventory = self.base / "toolchain.lock.json"
+        self.package_inventory.write_text(
+            json.dumps(
+                {
+                    "components": {
+                        "linuxIosWorkload": {
+                            "packages": [{"id": "IosPack", "version": "2.0"}]
+                        }
+                    }
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         write(self.root / "packs" / "Existing" / "1.0" / "payload", "existing\n")
         write(self.root / "sdk-manifests" / "10.0.100" / "base" / "1.0" / "manifest", "base\n")
         write(
@@ -155,8 +229,7 @@ class WorkloadTransactionContracts(unittest.TestCase):
         self.temporary.cleanup()
 
     def run_transaction(self, command: str, *, check: bool = True) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [
+        arguments = [
                 sys.executable,
                 str(WORKLOAD_TRANSACTION),
                 command,
@@ -164,7 +237,26 @@ class WorkloadTransactionContracts(unittest.TestCase):
                 str(self.root),
                 "--transaction",
                 str(self.transaction),
-            ],
+            ]
+        if command == "begin":
+            arguments.extend(
+                [
+                    "--package-inventory",
+                    str(self.package_inventory),
+                    "--sdk-feature-band",
+                    "10.0.400",
+                    "--workload-version",
+                    "10.0.401.1",
+                    "--workload-manifest",
+                    "2.0/10.0.100",
+                    "--workload-id",
+                    "ios",
+                    "--control-global-json",
+                    str(self.base / "control/global.json"),
+                ]
+            )
+        return subprocess.run(
+            arguments,
             check=check,
             capture_output=True,
             text=True,
@@ -172,11 +264,25 @@ class WorkloadTransactionContracts(unittest.TestCase):
 
     def add_ios_state(self) -> None:
         write(self.root / "packs" / "IosPack" / "2.0" / "payload", "ios\n")
-        write(self.root / "template-packs" / "ios.nupkg", "template\n")
-        write(self.root / "sdk-manifests" / "10.0.100" / "ios" / "2.0" / "manifest", "ios\n")
+        write(self.root / "template-packs" / "iospack.2.0.nupkg", "template\n")
+        write(
+            self.root
+            / "sdk-manifests"
+            / "10.0.100"
+            / "Microsoft.NET.Sdk.iOS"
+            / "2.0"
+            / "manifest",
+            "ios\n",
+        )
         write(
             self.root / "metadata" / "workloads" / "10.0.400" / "InstalledWorkloads" / "ios",
             "installed\n",
+        )
+        write(
+            self.root
+            / "metadata/workloads/X64/10.0.400/globaljsonworkloadsets.json",
+            json.dumps({str(self.base / "control/global.json"): "10.0.401.1"})
+            + "\n",
         )
 
     def test_prepared_rollback_restores_original_state(self) -> None:
@@ -209,7 +315,7 @@ class WorkloadTransactionContracts(unittest.TestCase):
         self.run_transaction("prepare-uninstall")
         (self.root / "packs" / "IosPack" / "2.0" / "payload").unlink()
         (self.root / "packs" / "IosPack" / "2.0").rmdir()
-        (self.root / "template-packs" / "ios.nupkg").unlink()
+        (self.root / "template-packs" / "iospack.2.0.nupkg").unlink()
         (self.root / "metadata" / "workloads" / "10.0.400" / "InstalledWorkloads" / "ios").unlink()
 
         self.run_transaction("restore")
@@ -217,7 +323,14 @@ class WorkloadTransactionContracts(unittest.TestCase):
         self.assertTrue((self.root / "packs" / "Later" / "3.0" / "payload").is_file())
         self.assertTrue((self.root / "metadata" / "workloads" / "10.0.400" / "InstalledWorkloads" / "wasm-tools").is_file())
         self.assertTrue((self.root / "metadata" / "workloads" / "10.0.400" / "InstalledWorkloads" / "android").is_file())
-        self.assertFalse((self.root / "sdk-manifests" / "10.0.100" / "ios").exists())
+        self.assertFalse(
+            (
+                self.root
+                / "sdk-manifests"
+                / "10.0.100"
+                / "Microsoft.NET.Sdk.iOS"
+            ).exists()
+        )
         self.assertFalse(self.transaction.exists())
 
     def test_modified_owned_pack_blocks_restore_before_any_removal(self) -> None:
@@ -231,9 +344,305 @@ class WorkloadTransactionContracts(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertIn("changed since setup", result.stderr)
-        self.assertTrue((self.root / "template-packs" / "ios.nupkg").is_file())
+        self.assertTrue((self.root / "template-packs" / "iospack.2.0.nupkg").is_file())
         self.assertTrue((self.root / "metadata" / "workloads" / "10.0.400" / "InstalledWorkloads" / "ios").is_file())
         self.assertTrue(self.transaction.exists())
+
+    def test_restoring_transaction_resumes_after_partial_metadata_restore(self) -> None:
+        self.run_transaction("begin")
+        self.add_ios_state()
+        self.run_transaction("commit")
+        state_path = self.transaction / "transaction.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        transaction_module = load_script(
+            WORKLOAD_TRANSACTION, f"workload_transaction_{id(self)}"
+        )
+        state["restorePreviousStatus"] = "committed"
+        state["restoreOps"] = transaction_module.build_restore_ops(
+            self.root,
+            state,
+            state["createdUnits"],
+            state["snapshotChanges"],
+            state.get("sharedJsonPatches", []),
+            remove_units=True,
+        )
+        state["restoreNext"] = 0
+        state["status"] = "restoring"
+        state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        ios_marker = self.root / "metadata/workloads/10.0.400/InstalledWorkloads/ios"
+        ios_marker.unlink()
+
+        self.run_transaction("restore")
+
+        self.assertFalse(self.transaction.exists())
+        self.assertFalse((self.root / "packs/IosPack").exists())
+        self.assertFalse(ios_marker.exists())
+        self.assertTrue(
+            (self.root / "metadata/workloads/10.0.400/InstalledWorkloads/android").is_file()
+        )
+
+    def test_restore_replays_operation_completed_before_cursor_advance(self) -> None:
+        self.run_transaction("begin")
+        self.add_ios_state()
+        self.run_transaction("commit")
+        transaction_module = load_script(
+            WORKLOAD_TRANSACTION, f"workload_transaction_fault_{id(self)}"
+        )
+        original = transaction_module.execute_restore_op
+
+        def interrupt_after_operation(*args, **kwargs):
+            original(*args, **kwargs)
+            raise RuntimeError("simulated termination before cursor advance")
+
+        with mock.patch.object(
+            transaction_module, "execute_restore_op", side_effect=interrupt_after_operation
+        ):
+            with self.assertRaises(RuntimeError):
+                transaction_module.restore(
+                    self.root.absolute(),
+                    self.transaction.absolute(),
+                    verify_committed=True,
+                    retain=True,
+                )
+
+        state = json.loads((self.transaction / "transaction.json").read_text(encoding="utf-8"))
+        self.assertEqual("restoring", state["status"])
+        self.assertEqual(0, state["restoreNext"])
+        transaction_module.restore(
+            self.root.absolute(),
+            self.transaction.absolute(),
+            verify_committed=True,
+            retain=False,
+        )
+        self.assertFalse(self.transaction.exists())
+        self.assertFalse((self.root / "packs/IosPack").exists())
+
+    def test_concurrent_unrelated_metadata_is_rejected_but_preserved_on_rollback(self) -> None:
+        self.run_transaction("begin")
+        self.add_ios_state()
+        concurrent = (
+            self.root
+            / "metadata/workloads/10.0.400/InstalledWorkloads/wasm-tools"
+        )
+        write(concurrent, "concurrent\n")
+
+        result = self.run_transaction("commit", check=False)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("outside this installation", result.stderr)
+        self.run_transaction("restore")
+        self.assertTrue(concurrent.is_file())
+        self.assertFalse(
+            (
+                self.root
+                / "metadata/workloads/10.0.400/InstalledWorkloads/ios"
+            ).exists()
+        )
+        self.assertFalse((self.root / "packs/IosPack").exists())
+
+    def test_shared_global_json_restores_only_the_owned_key(self) -> None:
+        shared = (
+            self.root
+            / "metadata/workloads/X64/10.0.400/globaljsonworkloadsets.json"
+        )
+        write(shared, json.dumps({"/other/global.json": "10.0.400.1"}) + "\n")
+        self.run_transaction("begin")
+        self.add_ios_state()
+        shared.write_text(
+            json.dumps(
+                {
+                    "/other/global.json": "10.0.499.1",
+                    str(self.base / "control/global.json"): "10.0.401.1",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.run_transaction("commit", check=False)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("key:/other/global.json", result.stderr)
+        self.run_transaction("restore")
+        self.assertEqual(
+            {"/other/global.json": "10.0.499.1"},
+            json.loads(shared.read_text(encoding="utf-8")),
+        )
+
+    def test_same_workload_set_consumer_preserves_exact_shared_resources(self) -> None:
+        self.run_transaction("begin")
+        self.add_ios_state()
+        shared = (
+            self.root
+            / "metadata/workloads/X64/10.0.400/globaljsonworkloadsets.json"
+        )
+        write(
+            shared,
+            json.dumps(
+                {
+                    str(self.base / "control/global.json"): "10.0.401.1",
+                    "/other/global.json": "10.0.401.1",
+                }
+            )
+            + "\n",
+        )
+
+        result = self.run_transaction("commit", check=False)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("key:/other/global.json", result.stderr)
+        self.run_transaction("restore")
+        self.assertTrue((self.root / "packs/IosPack/2.0/payload").is_file())
+        self.assertTrue(
+            (
+                self.root
+                / "sdk-manifests/10.0.100/Microsoft.NET.Sdk.iOS/2.0/manifest"
+            ).is_file()
+        )
+        self.assertTrue(
+            (
+                self.root
+                / "metadata/workloads/10.0.400/InstalledWorkloads/ios"
+            ).is_file()
+        )
+        self.assertEqual(
+            {"/other/global.json": "10.0.401.1"},
+            json.loads(shared.read_text(encoding="utf-8")),
+        )
+
+    def test_restore_replays_atomic_replace_that_preceded_parent_fsync(self) -> None:
+        owned = (
+            self.root
+            / "sdk-manifests/10.0.100/Microsoft.NET.Sdk.iOS/2.0/manifest"
+        )
+        write(owned, "before\n")
+        self.run_transaction("begin")
+        owned.write_text("after\n", encoding="utf-8")
+        write(
+            self.root
+            / "metadata/workloads/X64/10.0.400/globaljsonworkloadsets.json",
+            json.dumps({str(self.base / "control/global.json"): "10.0.401.1"})
+            + "\n",
+        )
+        self.run_transaction("commit")
+        transaction_module = load_script(
+            WORKLOAD_TRANSACTION, f"workload_transaction_replace_fault_{id(self)}"
+        )
+        original = transaction_module.fsync_directory
+        interrupted = False
+
+        def fail_once(path):
+            nonlocal interrupted
+            if not interrupted:
+                interrupted = True
+                raise RuntimeError("simulated power loss before replace fsync")
+            return original(path)
+
+        with mock.patch.object(
+            transaction_module, "fsync_directory", side_effect=fail_once
+        ):
+            with self.assertRaises(RuntimeError):
+                transaction_module.restore(
+                    self.root.absolute(),
+                    self.transaction.absolute(),
+                    verify_committed=True,
+                    retain=True,
+                )
+
+        self.assertEqual("before\n", owned.read_text(encoding="utf-8"))
+        transaction_module.restore(
+            self.root.absolute(),
+            self.transaction.absolute(),
+            verify_committed=True,
+            retain=False,
+        )
+        self.assertEqual("before\n", owned.read_text(encoding="utf-8"))
+
+    def test_restore_holds_the_sdk_interoperable_shared_metadata_lock(self) -> None:
+        self.run_transaction("begin")
+        self.add_ios_state()
+        self.run_transaction("commit")
+        transaction_module = load_script(
+            WORKLOAD_TRANSACTION, f"workload_transaction_lock_{id(self)}"
+        )
+        shared = (
+            self.root
+            / "metadata/workloads/X64/10.0.400/globaljsonworkloadsets.json"
+        )
+        original = transaction_module.execute_restore_op
+        checked = False
+
+        def assert_locked(*args, **kwargs):
+            nonlocal checked
+            if not checked:
+                contender = os.open(shared, os.O_RDWR)
+                try:
+                    with self.assertRaises(BlockingIOError):
+                        fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                finally:
+                    os.close(contender)
+                checked = True
+            return original(*args, **kwargs)
+
+        with mock.patch.object(
+            transaction_module, "execute_restore_op", side_effect=assert_locked
+        ):
+            transaction_module.restore(
+                self.root.absolute(),
+                self.transaction.absolute(),
+                verify_committed=True,
+                retain=False,
+            )
+        self.assertTrue(checked)
+
+    def test_restoring_plan_stops_destructive_ops_for_a_late_shared_consumer(self) -> None:
+        self.run_transaction("begin")
+        self.add_ios_state()
+        self.run_transaction("commit")
+        transaction_module = load_script(
+            WORKLOAD_TRANSACTION, f"workload_transaction_late_consumer_{id(self)}"
+        )
+        state_path = self.transaction / "transaction.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["restorePreviousStatus"] = "committed"
+        state["restoreOps"] = transaction_module.build_restore_ops(
+            self.root,
+            state,
+            state["createdUnits"],
+            state["snapshotChanges"],
+            state.get("sharedJsonPatches", []),
+            remove_units=True,
+        )
+        state["restoreNext"] = 0
+        state["status"] = "restoring"
+        state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        shared = (
+            self.root
+            / "metadata/workloads/X64/10.0.400/globaljsonworkloadsets.json"
+        )
+        shared.write_text(
+            json.dumps(
+                {
+                    str(self.base / "control/global.json"): "10.0.401.1",
+                    "/late/global.json": "10.0.401.1",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        transaction_module.restore(
+            self.root.absolute(),
+            self.transaction.absolute(),
+            verify_committed=True,
+            retain=False,
+        )
+
+        self.assertTrue((self.root / "packs/IosPack/2.0/payload").is_file())
+        self.assertEqual(
+            {"/late/global.json": "10.0.401.1"},
+            json.loads(shared.read_text(encoding="utf-8")),
+        )
 
 
 class TopLevelInstallerContracts(unittest.TestCase):
@@ -484,6 +893,57 @@ fi
             self.assertFalse(data.exists())
             self.assertFalse(cache.exists())
 
+    def test_dry_run_resolves_host_dotnet_and_reports_required_privilege(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="installer-host-dotnet-contract-") as temporary:
+            base = Path(temporary)
+            home = base / "home"
+            home.mkdir()
+            host_root = base / "system dotnet"
+            write(host_root / "dotnet", "#!/usr/bin/env bash\nexit 0\n", 0o755)
+            (host_root / "sdk" / "10.0.499").mkdir(parents=True)
+            fake_bin = base / "bin"
+            fake_bin.mkdir()
+            (fake_bin / "dotnet").symlink_to(host_root / "dotnet")
+            xcode = base / "Xcode_27.xip"
+            write(xcode, "not inspected during dry-run\n")
+            aot = base / "aot-pack"
+            aot.mkdir()
+            host_root.chmod(0o555)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "HOME": str(home),
+                    "PATH": f"{fake_bin}:{environment['PATH']}",
+                    "XDG_DATA_HOME": str(base / "data"),
+                    "XDG_CACHE_HOME": str(base / "cache"),
+                }
+            )
+
+            result = subprocess.run(
+                [
+                    str(TOP_LEVEL_INSTALLER),
+                    "install",
+                    "--xcode-archive",
+                    str(xcode),
+                    "--aot-pack",
+                    str(aot),
+                    "--dry-run",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertIn(f"dotnet_root={host_root}", result.stdout)
+            self.assertIn(f"dotnet_executable={host_root / 'dotnet'}", result.stdout)
+            self.assertIn("dotnet_sdk=10.0.499", result.stdout)
+            self.assertIn("privilege_mode=system-helper", result.stdout)
+            self.assertIn("sudo_required=true", result.stdout)
+            self.assertEqual([], list(home.iterdir()))
+            self.assertFalse((base / "data").exists())
+            self.assertFalse((base / "cache").exists())
+
     def test_application_projects_remain_byte_identical(self) -> None:
         expected = {
             "tests/HelloIos/HelloIos.csproj": "c784ddf1e500e09b891d2d5b3f3c1bffef4a7402941807ee518c642f45104bac",
@@ -552,10 +1012,46 @@ fi
             self.assertEqual("preserve\n", (cache_root / "unrelated").read_text(encoding="utf-8"))
             self.assertFalse((cache_root / ".dotnet-ios-linux-cache.json").exists())
 
-    def test_workload_update_relies_on_private_global_json_pin(self) -> None:
+    def test_workload_install_relies_on_private_global_json_pin(self) -> None:
         installer = TOP_LEVEL_INSTALLER.read_text(encoding="utf-8")
-        self.assertIn('"$dotnet_root/dotnet" workload update \\\n', installer)
-        self.assertNotIn("workload update --version", installer)
+        self.assertNotIn('"$dotnet_root/dotnet" workload update \\\n', installer)
+        self.assertIn('"$dotnet_root/dotnet" workload install ios \\\n', installer)
+        self.assertIn('"workloadVersion":sys.argv[3]', installer)
+        self.assertNotIn('"$dotnet_root/dotnet" workload uninstall ios', installer)
+        self.assertNotIn(
+            '"workload", "uninstall", "ios"',
+            SYSTEM_WORKLOAD_HELPER.read_text(encoding="utf-8"),
+        )
+
+    def test_success_output_selects_bash_or_zsh_startup_guidance(self) -> None:
+        installer = TOP_LEVEL_INSTALLER.read_text(encoding="utf-8")
+        success_output = installer.split("printf 'install=passed\\n'", maxsplit=1)[1]
+
+        self.assertIn('bash) startup_file="$HOME/.bashrc"', installer)
+        self.assertIn('zsh) startup_file="$HOME/.zshrc"', installer)
+        self.assertIn(
+            "printf '  export PATH=%q:\"$PATH\"\\n' \"$script_dir\"",
+            installer,
+        )
+        self.assertIn("print_shell_setup", success_output)
+
+    def test_system_root_elevates_only_the_installed_helper(self) -> None:
+        installer = TOP_LEVEL_INSTALLER.read_text(encoding="utf-8")
+        self.assertIn('host_dotnet="$(command -v dotnet || true)"', installer)
+        self.assertIn('"$sudo_executable" -- "$installed_system_helper"', installer)
+        self.assertIn('#!/usr/bin/python3 -I', SYSTEM_WORKLOAD_HELPER.read_text(encoding="utf-8"))
+        self.assertLess(
+            installer.index("((EUID != 0))"),
+            installer.index('. "$script_dir/eng/install/download-verified.sh"'),
+        )
+        self.assertNotIn("sudo -E", installer)
+        self.assertNotIn('"$sudo_executable" -- "$python_executable"', installer)
+        self.assertNotIn("sudo ./install.sh", installer)
+        fast_path = installer.index("if system_helper_matches_sources; then")
+        self.assertIn(
+            "sync_system_helper_files",
+            installer[fast_path : fast_path + 120],
+        )
 
     def test_activation_handles_paths_with_spaces(self) -> None:
         with tempfile.TemporaryDirectory(prefix="activation contract ") as temporary:
@@ -600,6 +1096,69 @@ fi
 
 
 class DurableAssetContracts(unittest.TestCase):
+    def test_record_flushes_asset_tree_before_receipt_update(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="durable-assets-record-fsync-") as temporary:
+            root = Path(temporary) / "data"
+            receipt = root / "receipts/install.json"
+            write(root / "activate", "owned\n")
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text(
+                json.dumps({"owner": "dotnet-ios-linux", "dataRoot": str(root)})
+                + "\n",
+                encoding="utf-8",
+            )
+            durable = load_script(DURABLE_ASSETS, f"durable_assets_record_{id(root)}")
+            calls: list[str] = []
+            original_sync = durable.fsync_tree
+            original_write = durable.write_receipt
+
+            def sync_tree(path):
+                calls.append("sync")
+                return original_sync(path)
+
+            def write_receipt(path, value):
+                calls.append("receipt")
+                return original_write(path, value)
+
+            with mock.patch.object(
+                durable, "fsync_tree", side_effect=sync_tree
+            ), mock.patch.object(
+                durable, "write_receipt", side_effect=write_receipt
+            ):
+                durable.record(root, receipt)
+            self.assertEqual(["sync", "receipt"], calls)
+
+    def test_uninstall_replays_an_unlink_that_preceded_parent_fsync(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="durable-assets-fsync-") as temporary:
+            root = Path(temporary) / "data"
+            receipt = root / "receipts/install.json"
+            owned = root / "activate"
+            write(owned, "owned\n")
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text(
+                json.dumps({"owner": "dotnet-ios-linux", "dataRoot": str(root)})
+                + "\n",
+                encoding="utf-8",
+            )
+            durable = load_script(DURABLE_ASSETS, f"durable_assets_{id(root)}")
+            durable.record(root, receipt)
+            original = durable.fsync_directory
+            interrupted = False
+
+            def fail_once(path):
+                nonlocal interrupted
+                if not interrupted:
+                    interrupted = True
+                    raise RuntimeError("simulated power loss before parent fsync")
+                return original(path)
+
+            with mock.patch.object(durable, "fsync_directory", side_effect=fail_once):
+                with self.assertRaises(RuntimeError):
+                    durable.uninstall(root, receipt)
+
+            durable.uninstall(root, receipt, allow_missing=True)
+            self.assertFalse(owned.exists())
+
     def test_uninstall_refuses_modified_owned_file_and_preserves_unknown_file(self) -> None:
         with tempfile.TemporaryDirectory(prefix="durable-assets-contract-") as temporary:
             base = Path(temporary)
@@ -640,6 +1199,22 @@ class DurableAssetContracts(unittest.TestCase):
             self.assertFalse((root / "activate").exists())
             self.assertFalse((root / "toolchains" / "locked" / "tool").exists())
             self.assertEqual("not owned\n", (root / "notes.txt").read_text())
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(DURABLE_ASSETS),
+                    "uninstall",
+                    "--allow-missing",
+                    "--root",
+                    str(root),
+                    "--receipt",
+                    str(receipt),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
 
 
 if __name__ == "__main__":

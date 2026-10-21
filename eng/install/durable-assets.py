@@ -8,7 +8,12 @@ import hashlib
 import json
 import os
 import stat
+import sys
+import tempfile
 from pathlib import Path, PurePosixPath
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from atomic import fsync_directory, fsync_path_state, fsync_tree
 
 
 OWNER = "dotnet-ios-linux"
@@ -60,9 +65,23 @@ def load_receipt(receipt: Path, root: Path) -> dict:
 
 
 def write_receipt(receipt: Path, value: dict) -> None:
-    temporary = receipt.with_name(receipt.name + f".tmp.{os.getpid()}")
-    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, receipt)
+    descriptor, raw_temporary = tempfile.mkstemp(prefix=f".{receipt.name}.", dir=receipt.parent)
+    temporary = Path(raw_temporary)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, receipt)
+        directory = os.open(receipt.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def inventory(root: Path) -> list[dict]:
@@ -84,6 +103,7 @@ def record(root: Path, receipt: Path) -> None:
     value = load_receipt(receipt, root)
     if "durableAssets" in value:
         fail("installation receipt already contains a durable asset inventory")
+    fsync_tree(root)
     entries = inventory(root)
     value["durableAssets"] = {
         "excludedPrefixes": sorted(EXCLUDED_PREFIXES),
@@ -104,7 +124,9 @@ def expected_signature(item: dict) -> dict:
     return result
 
 
-def verified_entries(root: Path, receipt: Path) -> list[tuple[Path, dict]]:
+def verified_entries(
+    root: Path, receipt: Path, *, allow_missing: bool = False
+) -> list[tuple[Path, dict]]:
     value = load_receipt(receipt, root)
     assets = value.get("durableAssets")
     if not isinstance(assets, dict) or assets.get("excludedPrefixes") != sorted(EXCLUDED_PREFIXES):
@@ -124,7 +146,11 @@ def verified_entries(root: Path, receipt: Path) -> list[tuple[Path, dict]]:
         seen.add(raw)
         path = root / safe_relative(raw)
         expected = expected_signature(item)
-        if signature(path) != expected:
+        actual = signature(path)
+        if actual is None and allow_missing:
+            entries.append((path, expected))
+            continue
+        if actual != expected:
             conflicts.append(raw)
         entries.append((path, expected))
     if conflicts:
@@ -139,17 +165,24 @@ def verify(root: Path, receipt: Path) -> None:
     print(f"durable_assets_verified={len(entries)}")
 
 
-def uninstall(root: Path, receipt: Path) -> None:
-    entries = verified_entries(root, receipt)
+def uninstall(root: Path, receipt: Path, *, allow_missing: bool = False) -> None:
+    entries = verified_entries(root, receipt, allow_missing=allow_missing)
     for path, expected in sorted(entries, key=lambda item: (len(item[0].parts), str(item[0])), reverse=True):
         if expected["kind"] == "directory":
             try:
                 path.rmdir()
+                fsync_directory(path.parent)
+            except FileNotFoundError:
+                fsync_path_state(path)
             except OSError:
                 # Unknown later files are not owned and keep their parents.
                 pass
         else:
-            path.unlink()
+            if os.path.lexists(path):
+                path.unlink()
+                fsync_directory(path.parent)
+            else:
+                fsync_path_state(path)
     remaining = inventory(root)
     print(f"durable_assets_removed={len(entries)}")
     print(f"unowned_assets_preserved={len(remaining)}")
@@ -160,6 +193,7 @@ def main() -> None:
     parser.add_argument("command", choices=("record", "verify", "uninstall"))
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
+    parser.add_argument("--allow-missing", action="store_true")
     args = parser.parse_args()
     root = args.root.expanduser().absolute()
     receipt = args.receipt.expanduser().absolute()
@@ -168,7 +202,7 @@ def main() -> None:
     elif args.command == "verify":
         verify(root, receipt)
     else:
-        uninstall(root, receipt)
+        uninstall(root, receipt, allow_missing=args.allow_missing)
 
 
 if __name__ == "__main__":
