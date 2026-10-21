@@ -49,9 +49,14 @@ def parse_arguments() -> argparse.Namespace:
         )
     )
     parser.add_argument("--config", required=True, type=Path, help="mode-600 private JSON config")
-    parser.add_argument("--app", required=True, type=Path, help="unsigned source .app")
-    parser.add_argument("--output", required=True, type=Path, help="new signed .app path")
-    parser.add_argument("--rcodesign-root", required=True, type=Path)
+    parser.add_argument(
+        "--validate-config",
+        action="store_true",
+        help="validate only the private config file and its required schema fields",
+    )
+    parser.add_argument("--app", type=Path, help="unsigned source .app")
+    parser.add_argument("--output", type=Path, help="new signed .app path")
+    parser.add_argument("--rcodesign-root", type=Path)
     parser.add_argument(
         "--pymobiledevice3-root",
         type=Path,
@@ -463,6 +468,11 @@ def sign_entity(
 
 def execute(arguments: argparse.Namespace) -> None:
     config = load_config(arguments.config)
+    if arguments.validate_config:
+        print("signing_config=ok")
+        return
+    if arguments.app is None or arguments.output is None or arguments.rcodesign_root is None:
+        raise SigningError("--app, --output, and --rcodesign-root are required for signing")
     identity = config["identity"]
     p12 = require_private_file(Path(identity["p12"]), "P12 identity")
     password_file = require_private_file(Path(identity["passwordFile"]), "P12 password file")

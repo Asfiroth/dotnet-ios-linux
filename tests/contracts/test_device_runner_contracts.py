@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import subprocess
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -59,6 +62,56 @@ DEVICE = load_device_module()
 
 
 class DeviceRunnerContracts(unittest.TestCase):
+    @staticmethod
+    def write_signing_config(path: Path) -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "identity": {
+                        "p12": str(path.parent / "missing-development.p12"),
+                        "passwordFile": str(path.parent / "missing-password.txt"),
+                    },
+                    "provisioningProfile": str(path.parent / "missing.mobileprovision"),
+                    "expectedTeamIdentifier": "TEAM000001",
+                    "expectedBundleIdentifier": "dev.dotnetioslinux.helloios",
+                }
+            ),
+            encoding="utf-8",
+        )
+        path.chmod(0o600)
+
+    @staticmethod
+    def runner_environment(root: Path) -> dict[str, str]:
+        environment = os.environ.copy()
+        environment["HOME"] = str(root / "home")
+        environment["XDG_DATA_HOME"] = str(root / "data")
+        environment["XDG_CACHE_HOME"] = str(root / "cache")
+        return environment
+
+    def run_runner(
+        self,
+        root: Path,
+        invocation_directory: Path,
+        project: Path,
+        *arguments: str,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                str(RUNNER),
+                "--project",
+                str(project),
+                *arguments,
+                "--confirm-install",
+                "--confirm-launch",
+            ],
+            cwd=invocation_directory,
+            env=self.runner_environment(root),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
     def test_device_workflow_accepts_application_bundle_identifier(self) -> None:
         self.assertEqual(
             "com.example.unoapp",
@@ -93,6 +146,72 @@ class DeviceRunnerContracts(unittest.TestCase):
         )
         self.assertEqual(2, result.returncode)
         self.assertIn("--confirm-install is required", result.stderr)
+
+    def test_runner_discovers_signing_config_in_invocation_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="dotnet-ios-linux-runner-") as temporary:
+            root = Path(temporary)
+            invocation_directory = root / "invocation"
+            project_directory = root / "project"
+            invocation_directory.mkdir()
+            project_directory.mkdir()
+            project = project_directory / "App.csproj"
+            project.write_text("<Project />\n", encoding="utf-8")
+            self.write_signing_config(invocation_directory / "ios-signing.json")
+
+            result = self.run_runner(root, invocation_directory, project)
+
+            self.assertEqual(1, result.returncode)
+            self.assertIn("installed data root is missing", result.stderr)
+            self.assertNotIn("signing configuration", result.stderr)
+
+    def test_runner_does_not_fall_back_to_project_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="dotnet-ios-linux-runner-") as temporary:
+            root = Path(temporary)
+            invocation_directory = root / "invocation"
+            project_directory = root / "project"
+            invocation_directory.mkdir()
+            project_directory.mkdir()
+            project = project_directory / "App.csproj"
+            project.write_text("<Project />\n", encoding="utf-8")
+            self.write_signing_config(project_directory / "ios-signing.json")
+
+            result = self.run_runner(root, invocation_directory, project)
+
+            self.assertEqual(2, result.returncode)
+            self.assertIn(
+                f"no signing configuration was found at {invocation_directory}/ios-signing.json",
+                result.stderr,
+            )
+            self.assertIn("provide --signing-config", result.stderr)
+
+    def test_explicit_signing_config_overrides_invocation_default(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="dotnet-ios-linux-runner-") as temporary:
+            root = Path(temporary)
+            invocation_directory = root / "invocation"
+            project_directory = root / "project"
+            private_directory = root / "private"
+            invocation_directory.mkdir()
+            project_directory.mkdir()
+            private_directory.mkdir()
+            project = project_directory / "App.csproj"
+            project.write_text("<Project />\n", encoding="utf-8")
+            default_config = invocation_directory / "ios-signing.json"
+            default_config.write_text("not json\n", encoding="utf-8")
+            default_config.chmod(0o600)
+            explicit_config = private_directory / "signing.json"
+            self.write_signing_config(explicit_config)
+
+            result = self.run_runner(
+                root,
+                invocation_directory,
+                project,
+                "--signing-config",
+                str(explicit_config),
+            )
+
+            self.assertEqual(1, result.returncode)
+            self.assertIn("installed data root is missing", result.stderr)
+            self.assertNotIn("cannot read signing config", result.stderr)
 
 
 if __name__ == "__main__":

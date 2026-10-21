@@ -9,6 +9,9 @@ usage() {
     cat <<'EOF'
 Usage:
   ./run-ios-app.sh --project /path/to/App.csproj \
+    --confirm-install --confirm-launch
+
+  ./run-ios-app.sh --project /path/to/App.csproj \
     --signing-config /private/path/signing.json \
     --confirm-install --confirm-launch
 
@@ -19,9 +22,16 @@ debugger. A personalized Developer Disk Image must already be mounted.
 
 Required options:
   --project PATH          Application project containing the net10.0-ios target.
-  --signing-config PATH   Mode-600 private signing configuration.
   --confirm-install       Acknowledge that the command will modify the device.
   --confirm-launch        Acknowledge that the command will start the application.
+
+Signing configuration:
+  --signing-config PATH   Mode-600 private signing configuration. Overrides the
+                          default current-directory ios-signing.json.
+
+When --signing-config is omitted, the runner checks only
+$(pwd -P)/ios-signing.json before building. The signer validates the referenced
+P12 identity, password file, and provisioning profile when signing the app.
 EOF
 }
 
@@ -41,7 +51,6 @@ while (($#)); do
 done
 
 [[ -n "$project" ]] || { printf -- '--project is required\n' >&2; usage >&2; exit 2; }
-[[ -n "$signing_config" ]] || { printf -- '--signing-config is required\n' >&2; usage >&2; exit 2; }
 [[ "$confirm_install" == true ]] || {
     printf -- '--confirm-install is required because this command modifies the connected device\n' >&2
     exit 2
@@ -63,11 +72,40 @@ fi
 
 readonly data_root="${XDG_DATA_HOME:-$HOME/.local/share}/dotnet-ios-linux"
 readonly cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/dotnet-ios-linux"
+readonly invocation_directory="$(pwd -P)"
 readonly activation="$data_root/activate"
 readonly receipt="$data_root/receipts/install.json"
 readonly integration_props="$script_dir/src/msbuild/DotnetIosLinux.Integration.props"
 readonly signing_tool="$script_dir/eng/toolchain/sign-ios-app.py"
 readonly device_tool="$script_dir/eng/toolchain/device-ios-app.py"
+
+[[ -f "$project" ]] || { printf 'project is not a file: %s\n' "$project" >&2; exit 1; }
+[[ "$project" == *.csproj ]] || { printf 'project must be a .csproj file\n' >&2; exit 1; }
+project="$(realpath "$project")"
+
+if [[ -z "$signing_config" ]]; then
+    signing_config="$invocation_directory/ios-signing.json"
+    [[ -f "$signing_config" ]] || {
+        printf 'no signing configuration was found at %s\n' "$signing_config" >&2
+        printf 'create that private file or provide --signing-config /private/path/signing.json\n' >&2
+        exit 2
+    }
+else
+    [[ -f "$signing_config" ]] || {
+        printf 'signing configuration is not a file: %s\n' "$signing_config" >&2
+        exit 1
+    }
+fi
+signing_config="$(realpath "$signing_config")"
+
+[[ -f "$signing_tool" ]] || {
+    printf 'signing tool is missing: %s\n' "$signing_tool" >&2
+    exit 1
+}
+if ! python3 "$signing_tool" --config "$signing_config" --validate-config >/dev/null; then
+    printf 'provide a valid private signing configuration with --signing-config PATH\n' >&2
+    exit 1
+fi
 
 [[ -d "$data_root" && ! -L "$data_root" ]] || {
     printf 'installed data root is missing or unsafe: %s\n' "$data_root" >&2
@@ -82,19 +120,10 @@ readonly device_tool="$script_dir/eng/toolchain/device-ios-app.py"
     printf 'complete ./install.sh install before running an application\n' >&2
     exit 1
 }
-[[ -f "$receipt" && -f "$integration_props" && -f "$signing_tool" && -f "$device_tool" ]] || {
+[[ -f "$receipt" && -f "$integration_props" && -f "$device_tool" ]] || {
     printf 'dotnet-ios-linux installation or repository tooling is incomplete\n' >&2
     exit 1
 }
-
-[[ -f "$project" ]] || { printf 'project is not a file: %s\n' "$project" >&2; exit 1; }
-[[ "$project" == *.csproj ]] || { printf 'project must be a .csproj file\n' >&2; exit 1; }
-[[ -f "$signing_config" ]] || {
-    printf 'signing configuration is not a file: %s\n' "$signing_config" >&2
-    exit 1
-}
-project="$(realpath "$project")"
-signing_config="$(realpath "$signing_config")"
 
 # Architecture-specific roots and an explicit SDK resolver override can make
 # Rider or a shell select a different SDK than the receipt-backed installation.

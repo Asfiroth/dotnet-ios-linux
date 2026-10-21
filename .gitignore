@@ -30,6 +30,7 @@ artifacts/
 *.key
 secrets/
 signing-config.json
+ios-signing.json
 *.signing-private.json
 # Private legacy capture quarantine at the repository root. Published sanitized
 # evidence records live under docs/evidence/receipts/.

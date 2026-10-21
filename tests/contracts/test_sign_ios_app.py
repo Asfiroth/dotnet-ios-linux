@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -19,6 +22,43 @@ SPEC.loader.exec_module(SIGNING)
 
 
 class SignIosAppContracts(unittest.TestCase):
+    def test_validate_config_does_not_require_signing_assets(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="dotnet-ios-linux-signing-config-") as temporary:
+            root = Path(temporary)
+            config = root / "ios-signing.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "identity": {
+                            "p12": str(root / "missing-development.p12"),
+                            "passwordFile": str(root / "missing-password.txt"),
+                        },
+                        "provisioningProfile": str(root / "missing.mobileprovision"),
+                        "expectedTeamIdentifier": "TEAM000001",
+                        "expectedBundleIdentifier": "dev.dotnetioslinux.helloios",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config.chmod(0o600)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(MODULE_PATH),
+                    "--config",
+                    str(config),
+                    "--validate-config",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("signing_config=ok\n", result.stdout)
+
     def test_profile_bundle_matching_supports_exact_and_wildcard_ids(self) -> None:
         self.assertTrue(
             SIGNING.profile_covers_bundle(

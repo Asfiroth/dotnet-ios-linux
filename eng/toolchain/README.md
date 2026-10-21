@@ -211,11 +211,13 @@ make a redistribution claim.
 
 Existing local signing assets are consumed through a private JSON file rather
 than command-line secret values. Copy `eng/toolchain/signing-config.example.json`
-outside the repository, fill in the P12, password-file, provisioning-profile,
-team, and bundle values, then restrict all four private files:
+to a private location, fill in the P12, password-file, provisioning-profile,
+team, and bundle values, then restrict all four private files. For automatic
+runner discovery, use the exact name `ios-signing.json` in the directory from
+which the runner will be invoked:
 
 ```sh
-chmod 600 /private/path/signing.json \
+chmod 600 /private/run-directory/ios-signing.json \
   /private/path/apple-development.p12 \
   /private/path/p12-password.txt \
   /private/path/development.mobileprovision
@@ -272,9 +274,16 @@ boundaries to a compatible application project:
 ```sh
 ./run-ios-app.sh \
   --project /absolute/path/to/App.csproj \
-  --signing-config /private/path/signing.json \
   --confirm-install --confirm-launch
 ```
+
+When `--signing-config` is omitted, the runner checks only
+`$PWD/ios-signing.json`; it does not scan the project directory or parent tree.
+Pass `--signing-config /private/path/signing.json` to override that default. The
+config must remain current-user-owned and mode `600`; do not commit it or any
+Apple signing assets. The runner validates the config file and schema before the
+build, but defers P12, password-file, and provisioning-profile validation until
+the signing step.
 
 It runs `doctor`, requires the project to select the receipt-recorded SDK,
 builds only `Release`/`net10.0-ios`/`ios-arm64` into the private project cache,

@@ -147,13 +147,53 @@ or `~/.zshrc` `PATH` entry for `run-ios-app.sh` and the command that reloads the
 file. Source `activate` explicitly for direct CLI work; `run-ios-app.sh` verifies
 and loads it automatically.
 
+## `run-ios-app.sh` usage
+
+After the toolchain is installed, use the runner only when an
+operator-approved personalized Developer Disk Image is already mounted and
+exactly one paired iPhone is connected over USB. Prepare a current-user-owned,
+mode-`600` signing configuration from
+[`eng/toolchain/signing-config.example.json`](eng/toolchain/signing-config.example.json).
+For the default discovery path:
+
+```sh
+install -m 600 eng/toolchain/signing-config.example.json "$PWD/ios-signing.json"
+# Edit "$PWD/ios-signing.json" with the private signing paths and identifiers.
+./run-ios-app.sh \
+  --project /absolute/path/to/App.csproj \
+  --confirm-install --confirm-launch
+```
+
+Without `--signing-config`, the runner reads exactly `$PWD/ios-signing.json`;
+it does not scan the project directory or parent directories. To use another
+private configuration, prepare it and pass the explicit override:
+
+```sh
+install -m 600 eng/toolchain/signing-config.example.json /private/path/signing.json
+# Edit /private/path/signing.json with the private signing paths and identifiers.
+./run-ios-app.sh \
+  --project /absolute/path/to/App.csproj \
+  --signing-config /private/path/signing.json \
+  --confirm-install --confirm-launch
+```
+
+Both acknowledgements are required: `--confirm-install` permits device changes
+and `--confirm-launch` permits starting the application. Before the build, the
+runner performs config-only validation of privacy, schema, team, bundle, and
+required string fields. It defers validation of the referenced P12, password
+file, and provisioning profile until signing. It builds the `Release`
+`net10.0-ios`/`ios-arm64` target unsigned, signs a private copy, validates the
+existing pairing and profile authorization, installs, and launches without
+emitting a device identifier. It does not attach a debugger. Do not commit the
+configuration or any Apple signing assets.
+
 ## Rider
 
 Rider discovers the installed iOS workload through normal .NET/MSBuild workload
 resolution. If the application loads with its iOS target available, no
 Rider-specific SDK, MSBuild, environment, solution, or project configuration is
-required for editing the project. Use the runner below for the supported Linux
-iOS build and device workflow.
+required for editing the project. For the supported Linux physical-device
+workflow and its invocation, see [run-ios-app.sh usage](#run-ios-appsh-usage).
 
 Stock Rider on Linux cannot use a locally connected iPhone in its built-in iOS
 device selector. JetBrains supports Apple-device run/debug through a local or
@@ -161,30 +201,12 @@ remote macOS host; the Linux iOS session is not extensible through a supported
 public plugin API. This project therefore does not claim Rider-managed iOS
 deployment or debugging.
 
-Use the explicit Linux device runner when an operator-approved personalized
-Developer Disk Image is already mounted and exactly one paired iPhone is
-connected over USB:
-
-```sh
-./run-ios-app.sh \
-  --project /absolute/path/to/App.csproj \
-  --signing-config /private/path/signing.json \
-  --confirm-install --confirm-launch
-```
-
-The signing configuration follows
-[`eng/toolchain/signing-config.example.json`](eng/toolchain/signing-config.example.json)
-and must remain outside the repository with mode `600`. The runner builds the
-`Release` `net10.0-ios`/`ios-arm64` target without code signing, signs a private
-copy, validates the existing pairing and profile authorization, installs, and
-launches the app without emitting a device identifier. It does not attach a
-debugger.
-
 To expose this operation through Rider's Run button, create a local **Shell
 Script** run configuration that executes the absolute path to this repository's
-`run-ios-app.sh` with the arguments above. Keep it local because it contains the
-private signing-configuration path. This is a command wrapper, not Rider iOS
-device or managed-debugger integration.
+`run-ios-app.sh` using the invocation and working-directory guidance in the
+standalone usage section. Keep it local because it selects private signing
+configuration. This is a command wrapper, not Rider iOS device or
+managed-debugger integration.
 
 ## Uninstall and cache policy
 
