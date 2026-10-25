@@ -5,7 +5,7 @@
   "status": "passed",
   "timestampUtc": "2026-10-20T00:00:00Z",
   "repositoryRevision": "2218dc6aac5dc2b9a980e12b31c56adf40a5bcc0",
-  "toolchainLockSha256": "0601c269996b6681987bcfd8171390cc2a5ddb9ff76b5abd7bb4590fc65a68b5",
+  "toolchainLockSha256": "3f33fc154ef95f5b15881bac9baa6a423ddac6cd2c050d14d678536d55f419e3",
   "host": {
     "os": "example-linux",
     "architecture": "x86_64",
@@ -19,7 +19,7 @@
     }
   ],
   "inputHashes": {
-    "toolchain.lock.json": "0601c269996b6681987bcfd8171390cc2a5ddb9ff76b5abd7bb4590fc65a68b5"
+    "toolchain.lock.json": "3f33fc154ef95f5b15881bac9baa6a423ddac6cd2c050d14d678536d55f419e3"
   },
   "outputHashes": {
     "repository_validation=passed\n": "1b5d614a7ffd4ae313be329433c9e4571d7aa692e95f9d89318b01e14ff6cb59"

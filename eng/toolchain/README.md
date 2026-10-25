@@ -58,31 +58,21 @@ reject simulator SDKs, non-arm64 targets, unknown tools, and unsupported
 `xcodebuild` operations. The Linux-only `mdimport` contract validates macios's
 output directory and explicitly skips unavailable Spotlight indexing.
 
-## Pinned Xcode 27 backend
+## Pinned host toolchain
 
-The selected backend source is `omarchy-apple-dev` commit
-`172e28cff7b6d5adebfa49f93957d6a864378dfb`. It targets the same Xcode 27.0 /
-iPhoneOS 27.0 family required by macios `27.0.10722`. Acquire and verify it
-without running its host-mutating installer:
-
-```sh
-eng/toolchain/acquire-omarchy-backend.sh \
-  --destination /tmp/opencode/omarchy-apple-dev-172e28c
-```
-
-The upstream installer is intentionally not the project installation path. At
-the selected revision it still installs mutable AUR/PyPI inputs, writes several
-user-global paths, changes Swift SDK registration, and can patch writable
-toolchain files. In particular, the current AUR `swift-bin` has moved to 6.4.1
-while the selected Xcode 27.0 backend is locked to its matching Swift 6.4.0
+The project installation path is implemented and audited only from this
+repository. Its host tools are independently pinned under
+`components.hostToolchain` in `toolchain.lock.json`; external host-setup
+projects are neither acquisition inputs nor compatibility or audit authorities.
+The selected Xcode 27.0 / iPhoneOS 27.0 family uses the locked Swift 6.4.0
 toolchain.
 
 Stage that exact Swift toolchain without changing `/usr`:
 
 ```sh
 eng/toolchain/setup-swift.sh \
-  --destination /tmp/opencode/dotnet-ios-backend/swift-6.4.0-pinned \
-  --cache /tmp/opencode/dotnet-ios-backend/downloads
+  --destination "$HOME/.local/share/dotnet-ios-linux/manual/swift-6.4.0-pinned" \
+  --cache "$HOME/.cache/dotnet-ios-linux/downloads"
 ```
 
 The setup extracts the hash-verified Swift archive, then builds ncurses `6.6`
@@ -93,23 +83,45 @@ manager, `patchelf`, `/usr` mutation, or ambient `LD_LIBRARY_PATH` is used. Two
 independent source builds produced byte-identical compatibility libraries and
 both passed a complete release `swift build` smoke test.
 
+Stage the exact private normalizer toolchain against that Swift stage:
+
+```sh
+eng/toolchain/setup-binutils.sh \
+  --destination "$HOME/.local/share/dotnet-ios-linux/manual/binutils-2.47" \
+  --cache "$HOME/.cache/dotnet-ios-linux/downloads" \
+  --swift-root "$HOME/.local/share/dotnet-ios-linux/manual/swift-6.4.0-pinned"
+```
+
+The setup builds GNU Binutils `2.47` from its hash-verified source archive with
+the locked Swift Clang/LLD tools. It stages only hash-locked `objcopy`, `strip`,
+and `readelf` plus the GPLv3 license. Two builds from distinct source, build,
+destination, and Swift prefixes produced identical tool bytes. Ambient GNU or
+LLVM normalizers are not accepted as fallbacks.
+
 Build the selected xtool fork against that stage:
 
 ```sh
 eng/toolchain/setup-xtool.sh \
-  --source-cache /tmp/opencode/dotnet-ios-backend/xtool-source-f0a1f90 \
-  --swift-root /tmp/opencode/dotnet-ios-backend/swift-6.4.0-pinned \
-  --destination /tmp/opencode/dotnet-ios-backend/xtool-f0a1f90
+  --source-cache "$HOME/.cache/dotnet-ios-linux/sources/xtool-f0a1f90" \
+  --swift-root "$HOME/.local/share/dotnet-ios-linux/manual/swift-6.4.0-pinned" \
+  --binutils-root "$HOME/.local/share/dotnet-ios-linux/manual/binutils-2.47" \
+  --destination "$HOME/.local/share/dotnet-ios-linux/manual/xtool-f0a1f90"
 ```
 
 The build enforces `eng/toolchain/xtool-Package.resolved.lock`, including the
 `OpenCombine` transitive pin missing from the upstream resolution, and verifies
 XADI's source revision and binary-artifact checksum. It leaves the source cache
 clean and bundles only the required private Swift runtime libraries with an
-`$ORIGIN` runpath. The non-runtime GNU build-ID note is removed and the varying
-`.swift_modhash` metadata section is zeroed after linking. Fresh offline builds
-from two different Swift prefixes are byte-identical at xtool SHA-256
-`91be27f15a5318b13487a89294e6f69cf7846cd9494d7c323d85ab44c6fab452`
+`$ORIGIN` runpath. The setup creates the neutral host mountpoint
+`/tmp/dotnet-ios-linux` when absent. A rootless user/mount namespace overlays
+only that directory with private tmpfs and presents every physical scratch tree
+at one fixed logical child path before compilation, preventing physical SwiftPM
+prefixes from entering Swift `#file` strings. No OpenCode-created path or
+pre-existing logical child is required. The pinned GNU tools then remove the
+non-runtime build-ID note, zero `.swift_modhash`, and strip unneeded symbols.
+Fresh offline builds from different physical and Swift prefixes are
+byte-identical at xtool SHA-256
+`c13e2270e6e9d9cce21ba7daae1b51016fcbd50c1bfd2c6747b1ebd208cb168d`
 and libXADI SHA-256
 `eb68bd3dad62f68eac166aad7dc4e8c931013f42a529a8f5d4c520e671375350`.
 Offline reuse rechecks those hashes and executes `--help` with
@@ -117,12 +129,17 @@ Offline reuse rechecks those hashes and executes `--help` with
 license files and 18 notices under `share/licenses/xtool`; its deterministic
 74-entry checksum inventory is rechecked on reuse.
 
+`--diagnostics-dir <new-directory>` may be supplied for a failed build. A hash
+mismatch retains checksummed phase artifacts, static ELF metadata, and exact
+normalizer provenance atomically. It never executes the unverified xtool;
+runtime checks occur only after the complete output hashes pass.
+
 Stage the pinned portable Python and uv before deployment tooling:
 
 ```sh
 eng/toolchain/setup-python.sh \
-  --destination /tmp/opencode/python-3.14.8 \
-  --cache /tmp/opencode/dotnet-ios-backend/downloads
+  --destination "$HOME/.local/share/dotnet-ios-linux/manual/python-3.14.8" \
+  --cache "$HOME/.cache/dotnet-ios-linux/downloads"
 ```
 
 This uses CPython `3.14.8` build `20261013` and uv `0.9.10`; both archives and
@@ -132,22 +149,22 @@ license inventory, and uv's Apache/MIT licenses under `share/licenses`. Those
 files are independently pinned and remain available after cache deletion. It
 does not merge into a system Python.
 
-Device transport uses the receipt-proven `pymobiledevice3` 11.26.0 rather than
-the upstream installer's unbounded latest version. Build it transactionally in
-a project-owned prefix with the complete Python 3.14/x86-64 lock:
+Device transport uses independently pinned `pymobiledevice3` 11.26.0. Build it
+transactionally in a project-owned prefix with the complete Python
+3.14/x86-64 lock:
 
 ```sh
 eng/toolchain/setup-pymobiledevice3.sh \
-  --destination /tmp/opencode/pymobiledevice3-11.26 \
-  --python /tmp/opencode/python-3.14.8/bin/python3 \
-  --uv /tmp/opencode/python-3.14.8/bin/uv \
-  --cache /tmp/opencode/pymobiledevice3-cache
+  --destination "$HOME/.local/share/dotnet-ios-linux/manual/pymobiledevice3-11.26" \
+  --python "$HOME/.local/share/dotnet-ios-linux/manual/python-3.14.8/bin/python3" \
+  --uv "$HOME/.local/share/dotnet-ios-linux/manual/python-3.14.8/bin/uv" \
+  --cache "$HOME/.cache/dotnet-ios-linux/pymobiledevice3"
 ```
 
 This environment contains no authentication or pairing records. Keep those in
 their normal private user locations and never include them in receipts. Full
-backend mode still requires a user-supplied Xcode 27 archive or extracted SDK;
-the no-Xcode framework subset is not accepted for the .NET native-link gate.
+native-link mode still requires a user-supplied Xcode 27 archive or extracted
+SDK; partial framework collections are not accepted for that gate.
 
 USB transport requires a working host `usbmuxd` service and OS device access.
 Provision those with the host's normal administration mechanism; the project
@@ -155,7 +172,7 @@ installer does not elevate privileges or modify system services. After
 reconnecting the unlocked phone, run identifier-free discovery first:
 
 ```sh
-/tmp/opencode/pymobiledevice3-11.26-pinned/bin/python \
+"$HOME/.local/share/dotnet-ios-linux/manual/pymobiledevice3-11.26/bin/python" \
   eng/toolchain/check-device-transport.py
 ```
 
@@ -163,7 +180,7 @@ Only after the phone has been trusted may the same probe validate an existing
 lockdown pairing:
 
 ```sh
-/tmp/opencode/pymobiledevice3-11.26-pinned/bin/python \
+"$HOME/.local/share/dotnet-ios-linux/manual/pymobiledevice3-11.26/bin/python" \
   eng/toolchain/check-device-transport.py --lockdown
 ```
 
@@ -176,7 +193,7 @@ redacting wrapper instead of invoking that command directly:
 
 ```sh
 python3 eng/toolchain/check-xtool-devices.py \
-  --xtool-root /tmp/opencode/dotnet-ios-backend/xtool-f0a1f90
+  --xtool-root "$HOME/.local/share/dotnet-ios-linux/manual/xtool-f0a1f90"
 ```
 
 The wrapper verifies the stage marker and executable hash, captures native

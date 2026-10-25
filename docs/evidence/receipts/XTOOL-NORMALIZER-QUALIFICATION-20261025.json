@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "id": "XTOOL-NORMALIZER-QUALIFICATION-20261025",
+  "milestone": "M2",
+  "status": "failed",
+  "timestampUtc": "2026-10-25T20:30:00Z",
+  "repositoryRevision": "0b8465b815f652ed9cf59937ee2001e5d69e1eea",
+  "toolchainLockSha256": "ec7cf5d3dec83286663233461391592cebe461f5214baf23b8f1d87bd24f36ef",
+  "host": {
+    "os": "Linux",
+    "architecture": "x86_64",
+    "distribution": "EndeavourOS",
+    "kernel": "7.2.11-arch1-1",
+    "notes": "Private offline normalizer qualification; identifying filesystem prefixes were redacted."
+  },
+  "commands": [
+    {
+      "command": "eng/toolchain/setup-xtool.sh --source-cache <cache>/xtool-f0a1f90 --swift-root <stage-a>/swift-6.4.0 --package-cache <cache>/swiftpm --destination <build-a>/xtool --diagnostics-dir <evidence-a> --offline",
+      "exitCode": 1,
+      "purpose": "Build and retain phase evidence using staged LLVM 21 llvm-objcopy from the first clean prefix."
+    },
+    {
+      "command": "eng/toolchain/setup-xtool.sh --source-cache <cache>/xtool-f0a1f90 --swift-root <stage-b>/swift-6.4.0 --package-cache <cache>/swiftpm --destination <build-b>/xtool --diagnostics-dir <evidence-b> --offline",
+      "exitCode": 1,
+      "purpose": "Repeat the offline staged-LLVM build from distinct Swift and build prefixes."
+    },
+    {
+      "command": "cmp <evidence-a>/strip-unneeded/xtool <evidence-b>/strip-unneeded/xtool",
+      "exitCode": 1,
+      "purpose": "Require byte identity between the two staged-LLVM outputs."
+    }
+  ],
+  "inputHashes": {
+    "toolchain.lock.json": "ec7cf5d3dec83286663233461391592cebe461f5214baf23b8f1d87bd24f36ef",
+    "Swift-6.4.0-archive": "50863678e3bafd91fcbc94c0bb76610bab37c1ee01e335fc7d8616904e03e19a",
+    "llvm-objcopy-21.0.0": "02901f6141b43b490e5b67ae9cc8f0414025897e1051333e1c32ca0a5fb4b0b3",
+    "xtool-Package.resolved.lock": "978f904cce959c45792fa57baafb4f6f8cbbdda95fbb2d3feb9e25c43b29e89e"
+  },
+  "outputHashes": {
+    "build-a-xtool": "4b4459bb6f590cd3c7753d60b7db0fc42f570ecee49318848b9209996f9d9e4d",
+    "build-b-xtool": "2b506aef6498c1df01a027e53c2dee67500c168473ed886b4e77539fb6d4ce7e",
+    "build-a-libXADI.so": "60802558031abcce7162d3bf8a71a22a09d2f034f221ea388f43a7fecbea6e0b",
+    "build-b-libXADI.so": "60802558031abcce7162d3bf8a71a22a09d2f034f221ea388f43a7fecbea6e0b"
+  },
+  "expectedBehavior": "Two clean offline builds using one staged normalizer produce byte-identical xtool and XADI files without weakening the complete-file hash gate.",
+  "observedBehavior": "The candidate failed qualification. LLVM changed XADI relative to the active lock, and xtool retained 59 differing .rodata bytes. Every difference was a Swift #file literal containing the distinct physical SwiftPM scratch prefix; Swift debug/file prefix maps did not rewrite those runtime strings.",
+  "limitations": [
+    "This failed build-only experiment does not evaluate signing, deployment, launch, device runtime, Rider, or Uno.",
+    "Raw binaries and path-bearing forensic captures remain private and are not published by the repository."
+  ],
+  "nextDecision": "Reject staged LLVM normalization and qualify a fixed logical SwiftPM path with source-built, hash-locked GNU Binutils before any output rebaseline.",
+  "redaction": {
+    "performed": true,
+    "excluded": [
+      "home-directory paths",
+      "raw executable artifacts",
+      "complete build logs"
+    ],
+    "notes": "Hashes, versions, phase outcome, and the 59-byte .rodata cause are retained without private prefixes."
+  },
+  "localLogReferences": [
+    "operator-controlled xtool LLVM qualification captures retained outside the repository"
+  ]
+}

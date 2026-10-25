@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "XTOOL-HERMETIC-QUALIFICATION-20261025",
+  "milestone": "M2",
+  "status": "passed",
+  "timestampUtc": "2026-10-25T21:55:00Z",
+  "repositoryRevision": "0b8465b815f652ed9cf59937ee2001e5d69e1eea",
+  "toolchainLockSha256": "b18e5fbfdd9d5424a06799adea06b51150020afb060bcec1de8c714bf4fa5b6f",
+  "host": {
+    "os": "Linux",
+    "architecture": "x86_64",
+    "distribution": "EndeavourOS",
+    "kernel": "7.2.11-arch1-1",
+    "notes": "Rootless user/mount namespace and offline SwiftPM cache were used. Identifying physical prefixes were redacted."
+  },
+  "commands": [
+    {
+      "command": "eng/toolchain/setup-binutils.sh --destination <binutils-stage> --cache <downloads> --swift-root <swift-stage> --offline",
+      "exitCode": 0,
+      "purpose": "Reproduce and verify the source-built GNU Binutils 2.47 stage."
+    },
+    {
+      "command": "eng/toolchain/setup-xtool.sh --source-cache <cache>/xtool-f0a1f90 --swift-root <stage-a>/swift-6.4.0 --binutils-root <binutils-stage> --package-cache <cache>/swiftpm --destination <physical-a>/xtool --offline",
+      "exitCode": 0,
+      "purpose": "Build xtool through the fixed logical mount from the first physical and Swift prefixes."
+    },
+    {
+      "command": "eng/toolchain/setup-xtool.sh --source-cache <cache>/xtool-f0a1f90 --swift-root <stage-b>/swift-6.4.0 --binutils-root <binutils-stage> --package-cache <cache>/swiftpm --destination <physical-b>/xtool --offline",
+      "exitCode": 0,
+      "purpose": "Repeat the clean offline build from distinct physical and Swift prefixes."
+    },
+    {
+      "command": "cmp <physical-a>/xtool/xtool <physical-b>/xtool/xtool; cmp <physical-a>/xtool/libXADI.so <physical-b>/xtool/libXADI.so; env -u LD_LIBRARY_PATH <each>/xtool --version; env -u LD_LIBRARY_PATH <each>/xtool --help",
+      "exitCode": 0,
+      "purpose": "Require complete byte identity and run post-hash runtime checks."
+    }
+  ],
+  "inputHashes": {
+    "toolchain.lock.json": "b18e5fbfdd9d5424a06799adea06b51150020afb060bcec1de8c714bf4fa5b6f",
+    "binutils-2.47.tar.bz2": "3068128c75cda9f898ccb4211d360246e8e195ffcc9dfb655b23ae23a54800e8",
+    "Swift-6.4.0-archive": "50863678e3bafd91fcbc94c0bb76610bab37c1ee01e335fc7d8616904e03e19a",
+    "xtool-Package.resolved.lock": "978f904cce959c45792fa57baafb4f6f8cbbdda95fbb2d3feb9e25c43b29e89e"
+  },
+  "outputHashes": {
+    "GNU-objcopy-2.47": "33959aff8231f8e050b3603eeddf75bf66e54a41f8cdb382371c202d5be370e0",
+    "GNU-strip-2.47": "705d6ecb90640da4844a9f2b847f077c8d721f1b613adc2f52b3c8daa243d49e",
+    "GNU-readelf-2.47": "9e61a3bb5cbf44dd92504562e751f737e636464d5425c28967323ef7b6545234",
+    "xtool": "6057279c2ae646ef4cb2fe162ee385d1fe3c62e9db85e04460826969d0ae9c21",
+    "libXADI.so": "eb68bd3dad62f68eac166aad7dc4e8c931013f42a529a8f5d4c520e671375350"
+  },
+  "expectedBehavior": "Distinct physical scratch and Swift prefixes converge through one fixed logical build path and pinned GNU tools without rewriting .rodata or bypassing complete-file hashes.",
+  "observedBehavior": "Both clean offline builds produced identical final xtool and XADI bytes and identical static ELF metadata. Neither physical prefix was present. xtool reported the exact revision and both --version and --help succeeded with LD_LIBRARY_PATH unset after complete candidate-hash agreement. Independent Binutils source builds also produced identical staged tools.",
+  "limitations": [
+    "Qualification covers the private Linux x86-64 xtool build and reuse boundary only; it does not independently requalify signing, deployment, launch, device runtime, Rider, or Uno.",
+    "Cross-distribution namespace and glibc-host qualification remains pending."
+  ],
+  "nextDecision": "Use the accepted hermetic path in installer staging and repeat the full authentic-Xcode root bootstrap gate.",
+  "redaction": {
+    "performed": true,
+    "excluded": [
+      "home-directory paths",
+      "raw executable artifacts",
+      "complete build logs"
+    ],
+    "notes": "Exact input/output hashes, tool versions, command shapes, and bounded results are published without private paths."
+  },
+  "localLogReferences": [
+    "operator-controlled hermetic xtool acceptance logs retained outside the repository"
+  ]
+}

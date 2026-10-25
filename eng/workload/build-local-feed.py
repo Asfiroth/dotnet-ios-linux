@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the locked project packs and locally derived iOS workload manifest."""
+"""Build a locked, plan-scoped local Apple-workload feed."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import argparse
 import base64
 import hashlib
 import html
+import importlib.util
 import json
 import os
 import re
@@ -21,10 +22,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
 from atomic import publish_directory_noreplace
 
 
+PACKAGER_PATH = Path(__file__).resolve().parents[1] / "runtime" / "package-aot-pack.py"
+PACKAGER_SPEC = importlib.util.spec_from_file_location("dotnet_ios_linux_aot_packager", PACKAGER_PATH)
+assert PACKAGER_SPEC is not None and PACKAGER_SPEC.loader is not None
+AOT_PACKAGER = importlib.util.module_from_spec(PACKAGER_SPEC)
+PACKAGER_SPEC.loader.exec_module(AOT_PACKAGER)
+
+
 PROJECT_VERSION = "0.1.0-preview.1"
 MANIFEST_ID = "Microsoft.NET.Sdk.iOS.Manifest-10.0.100"
 MANIFEST_VERSION = "27.0.10722"
 MANIFEST_SHA512 = "E67WwID69ZQmMd0fs8OFeExzyso/7rJk7QfIkK+fs+cEQj6e2s/hUA/iPtP36Li08YZVp8L7iY6Uk+zmfdU5Ww=="
+COMPANION_MANIFESTS = {
+    "macos": {
+        "id": "Microsoft.NET.Sdk.macOS.Manifest-10.0.100",
+        "sha512": "8WkzZbAVFxEpmyy1ZN4Rphgiz1ztwj5PgjyCtQ3v3Cw3b7a+kdOMPXrW7t4Etg+sNHsJ0JnNJz7vvlErRpfOIw==",
+    },
+    "maccatalyst": {
+        "id": "Microsoft.NET.Sdk.MacCatalyst.Manifest-10.0.100",
+        "sha512": "sjKXMijKU7PPIPUPfwf6+F3q1sxv5/gIVC6uc/sv/EnUnmTVWsUbHFxLNFVuIogbMH2sXUO1IHkwbont7AC+0A==",
+    },
+    "tvos": {
+        "id": "Microsoft.NET.Sdk.tvOS.Manifest-10.0.100",
+        "sha512": "zpEboVYprwxJcL/k15szLXtleBqJdF86wMEJvla6GUJkyX2ONgqatZPKYExvAmiMvKG+ltobdPoCiV0xLjHJSw==",
+    },
+}
 SDK_PACK_ID = "DotnetIosLinux.Sdk"
 AOT_PACK_ID = "DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64"
 RUNTIME_COMMIT = "4271d88e0aebf3d04f188f1334c2220d80555ef6"
@@ -45,15 +67,6 @@ LINUX_IOS_PACKS = [
     SDK_PACK_ID,
     AOT_PACK_ID,
 ]
-EXPECTED_AOT_FILES = {
-    "mono-aot-cross": "c85a0aad43764e9d17077f23faf6e638e79b47b315263116b2350038d977866d",
-    "libc++.so.1": "9233ff02fd30aba191b9a936eeb351d78682616fce2db29c08bbd1c3a581ca9c",
-    "libc++abi.so.1": "80bef63649f325c706768ecf9f29598429c712721b58c990117e86c826dbe534",
-    "llc": "8b53230508c94cda4ee541be27e7f9957becd32d5e2522f3be1bbe4c61079662",
-    "opt": "99464211ff7ba2175408c935d17ca375a99c564e88b476581e9b3d59af81d011",
-}
-
-
 def fail(message: str) -> "None":
     raise SystemExit(f"local workload feed: {message}")
 
@@ -84,12 +97,12 @@ def relaxed_json(data: bytes, label: str) -> dict:
     return value
 
 
-def read_nupkg(path: Path) -> dict[str, bytes]:
+def read_nupkg(path: Path, package_id: str, sha512: str) -> dict[str, bytes]:
     if not path.is_file():
         fail(f"official manifest package is missing: {path}")
     actual = sha512_base64(path)
-    if actual != MANIFEST_SHA512:
-        fail(f"official manifest SHA-512 mismatch: expected {MANIFEST_SHA512}, got {actual}")
+    if actual != sha512:
+        fail(f"official manifest SHA-512 mismatch: expected {sha512}, got {actual}")
     try:
         with zipfile.ZipFile(path) as archive:
             names = archive.namelist()
@@ -111,8 +124,8 @@ def nuspec_metadata(data: bytes) -> tuple[str, str]:
     return package_id.group(1), version.group(1)
 
 
-def derive_manifest(files: dict[str, bytes]) -> dict[str, bytes]:
-    nuspec_name = f"{MANIFEST_ID}.nuspec"
+def manifest_files(files: dict[str, bytes], package_id: str, workload_id: str) -> tuple[dict, dict, str]:
+    nuspec_name = f"{package_id}.nuspec"
     required = {
         nuspec_name,
         "Icon.png",
@@ -124,7 +137,7 @@ def derive_manifest(files: dict[str, bytes]) -> dict[str, bytes]:
     missing = sorted(required - files.keys())
     if missing:
         fail("official manifest package is incomplete: " + ", ".join(missing))
-    if nuspec_metadata(files[nuspec_name]) != (MANIFEST_ID, MANIFEST_VERSION):
+    if nuspec_metadata(files[nuspec_name]) != (package_id, MANIFEST_VERSION):
         fail("official manifest package identity does not match the lock")
 
     manifest = relaxed_json(files["data/WorkloadManifest.json"], "WorkloadManifest.json")
@@ -134,9 +147,15 @@ def derive_manifest(files: dict[str, bytes]) -> dict[str, bytes]:
     packs = manifest.get("packs")
     if not isinstance(workloads, dict) or not isinstance(packs, dict):
         fail("official workload manifest lacks workload or pack maps")
-    ios = workloads.get("ios")
-    if not isinstance(ios, dict) or not isinstance(ios.get("packs"), list):
-        fail("official workload manifest lacks the ios workload pack list")
+    workload = workloads.get(workload_id)
+    if not isinstance(workload, dict) or not isinstance(workload.get("packs"), list):
+        fail(f"official workload manifest lacks the {workload_id} workload pack list")
+    return manifest, workload, nuspec_name
+
+
+def derive_manifest(files: dict[str, bytes]) -> dict[str, bytes]:
+    manifest, ios, nuspec_name = manifest_files(files, MANIFEST_ID, "ios")
+    packs = manifest["packs"]
 
     extensions = ios.get("extends")
     if not isinstance(extensions, list) or "microsoft-net-runtime-ios" not in extensions:
@@ -207,6 +226,56 @@ def derive_manifest(files: dict[str, bytes]) -> dict[str, bytes]:
     }
 
 
+def derive_companion_manifest(files: dict[str, bytes], workload_id: str) -> dict[str, bytes]:
+    spec = COMPANION_MANIFESTS[workload_id]
+    package_id = spec["id"]
+    manifest, workload, nuspec_name = manifest_files(files, package_id, workload_id)
+    # macios exposes these workloads only through macOS-hosted Mono/AOT aliases.
+    # For registration on Linux, retain the authentic direct packs but remove the
+    # unsupported execution closure.  This package does not qualify a build or
+    # runtime path; that limitation is encoded in the derivative marker/receipt.
+    workload.pop("extends", None)
+    workload["platforms"] = ["linux-x64"]
+    marker = {
+        "schemaVersion": 1,
+        "owner": "dotnet-ios-linux",
+        "derivation": "local",
+        "officialPackageId": package_id,
+        "officialPackageVersion": MANIFEST_VERSION,
+        "officialPackageSha512Base64": spec["sha512"],
+        "workloadId": workload_id,
+        "supportClassification": "installed-unqualified",
+        "removedUnsupportedExtends": True,
+        "platforms": ["linux-x64"],
+    }
+    nuspec = f"""<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>{package_id}</id>
+    <version>{MANIFEST_VERSION}</version>
+    <authors>Microsoft;Asfiroth</authors>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="file">LICENSE</license>
+    <icon>Icon.png</icon>
+    <projectUrl>https://github.com/Asfiroth/dotnet-ios-linux</projectUrl>
+    <description>Local Linux registration-only derivative of the pinned Microsoft {workload_id} workload manifest.</description>
+    <copyright>Microsoft Corporation and dotnet-ios-linux contributors.</copyright>
+    <packageTypes><packageType name="DotnetPlatform" /></packageTypes>
+    <repository type="git" url="https://github.com/dotnet/macios" commit="d813e2baef17cd3a2bb5adc1e37610258d01cda3" />
+  </metadata>
+</package>
+""".encode()
+    return {
+        nuspec_name: nuspec,
+        "Icon.png": files["Icon.png"],
+        "LICENSE": files["LICENSE"],
+        "data/WorkloadDependencies.json": files["data/WorkloadDependencies.json"],
+        "data/WorkloadManifest.json": (json.dumps(manifest, indent=2) + "\n").encode(),
+        "data/WorkloadManifest.targets": files["data/WorkloadManifest.targets"],
+        "data/dotnet-ios-linux.json": (json.dumps(marker, indent=2) + "\n").encode(),
+    }
+
+
 def verify_project_nuspec(path: Path, package_id: str) -> bytes:
     try:
         data = path.read_bytes()
@@ -218,27 +287,10 @@ def verify_project_nuspec(path: Path, package_id: str) -> bytes:
 
 
 def verify_aot_pack(root: Path) -> None:
-    required = [root / "Sdk" / "Sdk.props", root / "tools" / "mono-aot-cross", root / "provenance.json"]
-    missing = [str(path) for path in required if not path.is_file()]
-    if missing:
-        fail("AOT pack is incomplete: " + ", ".join(missing))
     try:
-        provenance = json.loads((root / "provenance.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        fail(f"cannot read AOT provenance: {error}")
-    if provenance.get("packageId") != AOT_PACK_ID:
-        fail("AOT provenance has the wrong package ID")
-    if provenance.get("runtimeCommit") != RUNTIME_COMMIT:
-        fail("AOT provenance has the wrong runtime commit")
-    if provenance.get("llvmMode") != "llvm":
-        fail("AOT workload package must be LLVM-enabled")
-    recorded = provenance.get("files")
-    if recorded != EXPECTED_AOT_FILES:
-        fail("AOT provenance does not contain the locked compiler and LLVM output hashes")
-    for name, expected in recorded.items():
-        path = root / "tools" / name
-        if not path.is_file() or digest(path, "sha256") != expected:
-            fail(f"AOT payload does not match provenance: {name}")
+        AOT_PACKAGER.verify_published_aot_pack(root)
+    except SystemExit as error:
+        fail(str(error))
 
 
 def zip_info(name: str, executable: bool = False) -> zipfile.ZipInfo:
@@ -291,8 +343,26 @@ def package_aot(repository: Path, aot_root: Path, output: Path) -> None:
     write_nupkg(output, files)
 
 
-def nuget_config(feed: Path) -> str:
+def nuget_config(feed: Path, workloads: set[str] | None = None) -> str:
+    workloads = workloads or {"ios", *COMPANION_MANIFESTS}
     source = html.escape(str(feed), quote=True)
+    local_manifests = []
+    if "ios" in workloads:
+        local_manifests.append(MANIFEST_ID)
+    local_manifests.extend(
+        COMPANION_MANIFESTS[workload_id]["id"]
+        for workload_id in sorted(workloads - {"ios"})
+    )
+    manifest_patterns = "\n".join(
+        f'      <package pattern="{package_id}" />'
+        for package_id in local_manifests
+    )
+    project_patterns = (
+        f'      <package pattern="{SDK_PACK_ID}" />\n'
+        f'      <package pattern="{AOT_PACK_ID}" />'
+        if "ios" in workloads
+        else ""
+    )
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <packageSources>
@@ -302,9 +372,8 @@ def nuget_config(feed: Path) -> str:
   </packageSources>
   <packageSourceMapping>
     <packageSource key="dotnet-ios-linux">
-      <package pattern="{MANIFEST_ID}" />
-      <package pattern="{SDK_PACK_ID}" />
-      <package pattern="{AOT_PACK_ID}" />
+{manifest_patterns}
+{project_patterns}
     </packageSource>
     <packageSource key="nuget.org">
       <package pattern="*" />
@@ -342,23 +411,60 @@ def verify_existing(output: Path, expected: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--official-manifest", type=Path, required=True)
-    parser.add_argument("--aot-pack", type=Path, required=True)
+    parser.add_argument("--official-manifest", type=Path)
+    parser.add_argument(
+        "--official-companion-manifest",
+        action="append",
+        default=[],
+        metavar="WORKLOAD=PATH",
+        help="hash-verified macos, maccatalyst, or tvos manifest archive",
+    )
+    parser.add_argument("--aot-pack", type=Path)
+    parser.add_argument(
+        "--workload",
+        action="append",
+        choices=("ios", *sorted(COMPANION_MANIFESTS)),
+        default=[],
+        help="workload whose local derivative is exposed (default: all direct Apple workloads)",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
     repository = Path(__file__).resolve().parents[2]
-    official = args.official_manifest.expanduser().resolve()
-    aot_root = args.aot_pack.expanduser().resolve()
+    workloads = set(args.workload) or {"ios", *COMPANION_MANIFESTS}
+    if "ios" in workloads and args.official_manifest is None:
+        parser.error("--official-manifest is required when ios is selected")
+    if "ios" in workloads and args.aot_pack is None:
+        parser.error("--aot-pack is required when ios is selected")
+    official = args.official_manifest.expanduser().resolve() if args.official_manifest else None
+    companions: dict[str, Path] = {}
+    for raw in args.official_companion_manifest:
+        workload_id, separator, raw_path = raw.partition("=")
+        if separator != "=" or workload_id not in COMPANION_MANIFESTS or not raw_path:
+            parser.error("--official-companion-manifest must be macos=PATH, maccatalyst=PATH, or tvos=PATH")
+        if workload_id in companions:
+            parser.error(f"duplicate companion manifest: {workload_id}")
+        companions[workload_id] = Path(raw_path).expanduser().resolve()
+    missing_companions = sorted((workloads - {"ios"}) - set(companions))
+    if missing_companions:
+        parser.error("missing companion manifests: " + ", ".join(missing_companions))
+    aot_root = args.aot_pack.expanduser().resolve() if args.aot_pack else None
     output = args.output.expanduser().absolute()
     provenance = {
         "schemaVersion": 1,
         "owner": "dotnet-ios-linux",
         "projectVersion": PROJECT_VERSION,
-        "officialManifestSha512Base64": MANIFEST_SHA512,
-        "aotProvenanceSha256": digest(aot_root / "provenance.json", "sha256")
-        if (aot_root / "provenance.json").is_file()
-        else None,
+        "workloads": sorted(workloads),
+        "officialManifestSha512Base64": MANIFEST_SHA512 if "ios" in workloads else None,
+        "officialCompanionManifestSha512Base64": {
+            workload_id: COMPANION_MANIFESTS[workload_id]["sha512"]
+            for workload_id in sorted(workloads - {"ios"})
+        },
+        "aotProvenanceSha256": (
+            digest(aot_root / "provenance.json", "sha256")
+            if aot_root is not None and (aot_root / "provenance.json").is_file()
+            else None
+        ),
     }
     if output.exists() or output.is_symlink():
         if output.is_symlink():
@@ -368,22 +474,52 @@ def main() -> None:
         print("reused=true")
         return
 
-    official_files = read_nupkg(official)
-    verify_aot_pack(aot_root)
+    official_files = read_nupkg(official, MANIFEST_ID, MANIFEST_SHA512) if official else None
+    companion_files = {
+        workload_id: read_nupkg(
+            path, COMPANION_MANIFESTS[workload_id]["id"], COMPANION_MANIFESTS[workload_id]["sha512"]
+        )
+        for workload_id, path in companions.items()
+    }
+    if "ios" in workloads:
+        assert aot_root is not None
+        verify_aot_pack(aot_root)
     output.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=".workload-feed-", dir=output.parent))
     try:
-        sdk_nupkg = stage / f"{SDK_PACK_ID}.{PROJECT_VERSION}.nupkg"
-        aot_nupkg = stage / f"{AOT_PACK_ID}.{PROJECT_VERSION}.nupkg"
-        manifest_nupkg = stage / f"{MANIFEST_ID}.{MANIFEST_VERSION}.nupkg"
-        package_sdk(repository, sdk_nupkg)
-        package_aot(repository, aot_root, aot_nupkg)
-        write_nupkg(manifest_nupkg, derive_manifest(official_files))
-        packages = [
-            package_record(sdk_nupkg, SDK_PACK_ID, PROJECT_VERSION, "project"),
-            package_record(aot_nupkg, AOT_PACK_ID, PROJECT_VERSION, "local-build"),
-            package_record(manifest_nupkg, MANIFEST_ID, MANIFEST_VERSION, "local-derivative"),
-        ]
+        packages: list[dict] = []
+        if "ios" in workloads:
+            sdk_nupkg = stage / f"{SDK_PACK_ID}.{PROJECT_VERSION}.nupkg"
+            aot_nupkg = stage / f"{AOT_PACK_ID}.{PROJECT_VERSION}.nupkg"
+            manifest_nupkg = stage / f"{MANIFEST_ID}.{MANIFEST_VERSION}.nupkg"
+            package_sdk(repository, sdk_nupkg)
+            assert aot_root is not None and official_files is not None
+            package_aot(repository, aot_root, aot_nupkg)
+            write_nupkg(manifest_nupkg, derive_manifest(official_files))
+            packages.extend(
+                [
+                    package_record(sdk_nupkg, SDK_PACK_ID, PROJECT_VERSION, "project"),
+                    package_record(aot_nupkg, AOT_PACK_ID, PROJECT_VERSION, "local-build"),
+                    package_record(manifest_nupkg, MANIFEST_ID, MANIFEST_VERSION, "local-derivative"),
+                ]
+            )
+        companion_nupkgs: dict[str, Path] = {}
+        for workload_id in sorted(workloads - {"ios"}):
+            package_id = COMPANION_MANIFESTS[workload_id]["id"]
+            path = stage / f"{package_id}.{MANIFEST_VERSION}.nupkg"
+            write_nupkg(path, derive_companion_manifest(companion_files[workload_id], workload_id))
+            companion_nupkgs[workload_id] = path
+        packages.extend(
+            [
+                package_record(
+                    companion_nupkgs[workload_id],
+                    COMPANION_MANIFESTS[workload_id]["id"],
+                    MANIFEST_VERSION,
+                    "local-derivative",
+                )
+                for workload_id in sorted(workloads - {"ios"})
+            ]
+        )
         feed_lock = {
             "schemaVersion": 1,
             "owner": "dotnet-ios-linux",
@@ -395,7 +531,7 @@ def main() -> None:
             },
         }
         (stage / "feed-lock.json").write_text(json.dumps(feed_lock, indent=2) + "\n", encoding="utf-8")
-        (stage / "NuGet.Config").write_text(nuget_config(output), encoding="utf-8")
+        (stage / "NuGet.Config").write_text(nuget_config(output, workloads), encoding="utf-8")
         (stage / MARKER).write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
         try:
             publish_directory_noreplace(stage, output)

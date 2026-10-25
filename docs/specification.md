@@ -3,7 +3,7 @@
 Status: experimental; private/local M2–M9 device-path evidence is recorded,
 sanitized receipt publication is pending, and the root bootstrap remains a
 candidate under validation.
-Date: 2026-10-17; last updated 2026-10-21.
+Date: 2026-10-17; last updated 2026-10-25.
 Target host: glibc Linux x86_64; current evidence host is EndeavourOS/Arch.
 Decision basis: accepted [architecture decision records](decisions/README.md).
 The “Linux Mac Development Setup” conversation
@@ -43,12 +43,13 @@ The first technical success is an unsigned minimal UIKit application. The first 
 | Area | Decision | Current evidence / remaining gate |
 | --- | --- | --- |
 | SDK root | Root containing the real active host `dotnet` executable | Writable-root merge contracts pass; constrained system-root contracts pass; live package-manager-root qualification remains |
-| Workload identity | Public workload ID remains `ios` | Direct Linux graph installs as the sole effective `ios` definition |
-| Manifest | Deterministic unsigned derivative of `Microsoft.NET.Sdk.iOS.Manifest-10.0.100` `27.0.10722` | Update/install/list/restore/repair/uninstall/clean/reinstall passed |
-| Microsoft packs | Reuse exact official SDK, reference, runtime, task, and template packs | Complete 12-package direct graph is hash-locked; broader app coverage remains |
+| Workload identity | Direct registrations are `ios`, `macos`, `maccatalyst`, and `tvos`; only `ios` is Linux runtime/device-qualified | One aggregate CLI transaction installs the selected registrations in a writable root; `--keep-existing` preserves an exact lock-compatible direct external registration |
+| Apple companion workloads | Exact locked registration-only derivatives for macOS, Mac Catalyst, and tvOS | No Linux companion native-bundle, signing, deployment, or runtime claim; see [ADR-0008](decisions/0008-register-locked-apple-companions.md) |
+| Manifest | Deterministic unsigned derivatives of the four direct Apple manifest packages at `27.0.10722` | Disposable-root all-four install/list/restore/uninstall evidence; iOS alone has a Linux execution graph |
+| Microsoft packs | Reuse exact official SDK, reference, runtime, task, and template packs | The selected direct Apple package closures are hash-locked; broader app coverage remains |
 | AOT | Package the exact LLVM-enabled Linux-hosted Mono cross compiler for iOS arm64 | Full app link and repeated physical-device probes passed |
 | Xcode | Synthetic layout selected by `DEVELOPER_DIR` | Pinned macios discovery/native link passed; broader Xcode tool coverage remains |
-| Darwin backend | Reuse pinned omarchy-apple-dev components | Minimal Xcode 27 tool, signing, and deployment slice passed |
+| Darwin backend | Project-owned Linux adapters and independently pinned host tools | Minimal Xcode 27 tool, signing, and deployment slice passed |
 | Uno environment check | Target: stock binary with a custom manifest | Pending qualification: Linux iOS check must run rather than be silently filtered out |
 | IDE | Stock Rider with receipt-bound host CLI | Target: evaluation/build; Run/debug remain separate gates |
 
@@ -89,13 +90,15 @@ deployment paths, Rider, uno-check, and Uno remain unverified. Preserve the
 superseded `10.0.302` / `26.5.10301` material only as historical summary; do not
 mix the two graphs.
 
-`toolchain.lock.json` records the SDK version and hash, SDK feature band, workload installation mode/set, manifest IDs and versions, every direct package ID/version/hash, runtime source commit, compiler and LLVM outputs, Apple SDK version/build/hash, Xcode metadata, backend revision, portable Swift/Python dependencies, signing/deployment tools, and remaining evidence gaps. The runtime commit is traced to the selected device runtime rather than inferred solely from the SDK version.
+`toolchain.lock.json` records the SDK version and hash, SDK feature band, workload installation mode/set, manifest IDs and versions, every direct package ID/version/hash, runtime source commit, compiler and LLVM outputs, Apple SDK version/build/hash, Xcode metadata, independently selected host-tool revisions, portable Swift/Python dependencies, signing/deployment tools, and remaining evidence gaps. The runtime commit is traced to the selected device runtime rather than inferred solely from the SDK version.
 
 Keep SDK version, SDK feature band, manifest package suffix, manifest version, workload-set version, iOS SDK version, and deployment target distinct. For example, SDK `10.0.402` belongs to feature band `10.0.400`; this alone does not establish which manifest package suffix or fallback directory the distribution consumes. Inspect the selected SDK's behavior rather than copying a path blindly.
 
 ### Non-goals for the first MVP
 
-- iOS simulator, Linux arm64 or musl hosts, macOS/Catalyst/tvOS/watchOS targets.
+- iOS simulator, Linux arm64 or musl hosts, and macOS/Catalyst/tvOS/watchOS
+  runtime targets. macOS, Mac Catalyst, and tvOS may be registered from their
+  locked derivatives, but registration does not establish target support.
 - NativeAOT, CoreCLR, managed breakpoints, hot reload, or a full Xcode replacement.
 - Wireless deployment, automatic Apple-account enrollment, or App Store submission.
 - General compatibility with all asset catalogs, storyboards, native plugins, or Swift packages.
@@ -120,7 +123,7 @@ Rider / terminal / stock uno-check + project manifest
                          |
       Linux Mono AOT cross compiler -> arm64 objects
                          |
- synthetic Xcode + omarchy Darwin tools + Apple SDK
+ synthetic Xcode + project-owned adapters + Apple SDK
                          |
              native link -> unsigned .app
                          |
@@ -150,6 +153,20 @@ pre-existing SDK and uses the constrained workload helper defined by
 not merge its fallback SDK into that root. Existing SDKs, Android/WebAssembly
 workloads, packs, metadata, and history must be inventoried and preserved.
 
+`./install.sh preflight` performs that inventory without invoking `dotnet` or
+creating project data/cache roots. It derives Apple-family classifications from
+the active workload set, its manifests, and `extends` metadata. Installed
+markers remain the sole source of presence. A workload whose closure reaches
+only non-iOS Apple roots is reference-only for execution on Linux. Preflight
+preserves and reports it without mutation; it does not decide the install plan.
+Ambiguous or malformed metadata fails closed. This is an inventory boundary, not
+a workload-set upgrade mechanism.
+
+An iOS-derived workload remains unqualified unless it is direct `ios`.
+`mixed-unqualified` means a closure with a non-Apple leaf or with `ios` plus
+another Apple root. Inventory classification does not create Linux execution
+support or modify observed state.
+
 The generated activation file sets the receipt-recorded `DOTNET_ROOT`, puts its
 `dotnet` and tool directory on `PATH`, exports `DEVELOPER_DIR`, and adds the
 project shim directory for that development environment. Rider must explicitly
@@ -166,21 +183,56 @@ disposable-host qualification.
 
 ### 4.2 Workload resolution and installation
 
-The public command remains `dotnet workload install ios`. SDK 10.0.402 selects manifest package identity `Microsoft.NET.Sdk.iOS.Manifest-10.0.100`; a distinct project manifest cannot safely replace the effective graph. The implemented strategy therefore derives an unsigned local package with that exact ID/version from the hash-verified official `27.0.10722` package. It removes the unsupported Mono iOS `extends` edges, declares `linux-x64`, and supplies a direct net10 physical-device graph. The original package is never modified or redistributed as project source.
+For a writable root, the installer invokes one standard CLI command for the direct selected workload
+set: `dotnet workload install ios macos maccatalyst tvos`. SDK 10.0.402 selects
+the exact official manifest packages at `27.0.10722`; distinct project manifest
+IDs cannot safely replace those effective graphs. The installer therefore
+derives unsigned local packages with those exact IDs/versions from the
+hash-verified official packages. The iOS derivative removes unsupported Mono
+iOS `extends` edges, declares `linux-x64`, and supplies a direct net10
+physical-device graph. Companion derivatives remove unsupported `extends`,
+declare `linux-x64`, and preserve an explicit `installed-unqualified` boundary.
+Original packages are never modified or redistributed as project source.
 
-The direct graph contains the iOS 27 SDK/reference/generic runtime/device runtime/template packs, the iOS 26 net10 SDK fallback required by libraries without an explicit `TargetPlatformVersion`, runtime `10.0.12` Mono/device/task/targets packs, and the two distinctly named project packs. `toolchain.lock.json` records SHA-256 and SHA-512 for all 12 installed/feed archives. `verify-workload-packages.py` rehashes the local derivative, project packages, and installed official archives after installation and during doctor. It also requires all nine installed NuGet.org archives to pass author/repository signature verification in offline revocation mode and verifies that local deterministic packages remain unsigned.
+`macos`, `maccatalyst`, and `tvos` are **registration-only** on Linux. Their
+locked closures are acquired and verified so the CLI can register them, but no
+Linux companion compiler, native bundle, signing, deployment, launch, runtime,
+Rider, or Uno support is claimed. A workload that reaches `ios` indirectly, or
+reaches `ios` plus another Apple root, or reaches both Apple and non-Apple
+targets, is unqualified; it is not broad MAUI
+support and requires independent consumer evidence.
+
+The iOS graph contains the iOS 27 SDK/reference/generic runtime/device
+runtime/template packs, the iOS 26 net10 SDK fallback required by libraries
+without an explicit `TargetPlatformVersion`, runtime `10.0.12`
+Mono/device/task/targets packs, and the two distinctly named project packs.
+Companion graphs contain their exact official package closures and their one
+local derivative each. `toolchain.lock.json` records SHA-256 and SHA-512 for
+each selected archive. `verify-workload-packages.py` rehashes local derivatives,
+project packages, and installed official archives after installation and during
+doctor. It requires official NuGet.org archives to pass author/repository
+signature verification in offline revocation mode and verifies local deterministic
+packages remain unsigned.
 
 The bootstrap stages and validates the complete graph before activation. Project package names never impersonate official Microsoft packs. The automatically imported compatibility SDK selects `DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64`; integration evidence confirms that macios consumes this physical compiler path.
 
 Manifest-generated imports must load the Linux compatibility pack before the relevant upstream targets consume its values. Preserve official reference and device-runtime contents byte-for-byte. An official SDK pack may contain unusable Mach-O host executables; inventory those separately from its reusable managed assemblies.
 
-The standard CLI owns workload installation records; no records are fabricated by hand. Isolated test gates pass update, install, list, restore, repair, CLI uninstall, clean, and reinstall; production setup invokes only pinned install and uses receipt-backed restoration for teardown. Path-level three-way restoration preserves unrelated workload metadata and history, while pack receipts refuse modified owned payloads. A disposable copy containing real Android, MAUI Android, and Wasm workloads retained those workloads and shared packs after iOS uninstall.
+The standard CLI owns workload installation records; no records are fabricated by
+hand. Isolated test gates pass update, install, list, restore, repair, CLI
+uninstall, clean, and reinstall. Production setup uses receipt-backed aggregate
+restoration for teardown. It snapshots only selected Apple predecessor closures,
+restores prior bytes/metadata, journals unavoidable global `InstalledPacks`
+reconciliation without replaying foreign records, and refuses changed protected
+payloads. A disposable copy with
+real Android, MAUI Android, and Wasm workloads retained those workloads and
+shared packs after all-four registration and restoration.
 
 Normal application `global.json` stays standard. Bootstrap workload operations
 run beneath a private control `global.json` that pins the resolved installed SDK
 patch and compatible installed workload set for the transaction. SDK selection
 stays within the lock's supported feature band; workload-set selection requires
-an exact match for the locked iOS manifest mapping. The lock's SDK and workload
+an exact match for all four locked direct Apple manifest mappings. The lock's SDK and workload
 set remain hash-verified fallbacks when compatible installations are absent in
 a writable root. A non-writable root must already contain a compatible SDK, and
 the selected workload-set version must equal the lock. No SDK fallback is merged
@@ -205,9 +257,12 @@ child still mutates the root.
 
 Install and teardown use durable per-operation cursors, same-filesystem removal
 tombstones, atomic file replacement, data-before-journal fsync ordering, and an
-atomic finalization tombstone. Production installation invokes only the pinned
-`dotnet workload install ios`; teardown restores the exact receipt-owned paths
-and JSON key instead of invoking broad workload update or uninstall commands.
+atomic finalization tombstone. Writable-root production installation invokes the
+pinned all-four CLI command. A system-root request is explicitly transformed to
+the helper's established iOS-only plan, with companion registration deferred
+and `--keep-existing` rejected. Teardown restores the exact
+receipt-owned paths and JSON key instead of invoking broad workload update or
+uninstall commands.
 While checking same-set consumers and restoring paths, the transaction holds the
 Linux `flock` honored by SDK `FileShare.None` on
 `globaljsonworkloadsets.json`. The owned JSON mutation is published last. Any
@@ -256,7 +311,13 @@ Proposed installed layout; files are added only when required by observed consum
 
 Expose the SDK through `DEVELOPER_DIR=$HOME/.local/share/dotnet-ios-linux/Xcode.app/Contents/Developer`. Preserve the Apple SDK's own metadata and record its build identifier. Tool discovery must never claim Xcode features that the backend does not implement.
 
-Reuse the full SDK/tooling path from [omarchy-apple-dev](https://github.com/joshuaswarren/omarchy-apple-dev), pinned to a compatible revision. Its current README describes a newer default stack than the requested baseline and separately records older device evidence; neither proves .NET compatibility. Select and test components instead of running an unpinned installer. Extract the SDK from the user's Xcode installation, optionally through `mac-build.asfiroth.home` when access is configured. Do not bundle Apple SDK files in project releases. Retain dependency licenses and audit redistribution eligibility before publishing binaries.
+Build the Linux tool path only from independently pinned inputs in
+`toolchain.lock.json` and project-owned setup scripts. Third-party host-setup
+projects are not installer inputs, compatibility authorities, audit baselines,
+or reference implementations. Extract the SDK from the user's Xcode
+installation, optionally through `mac-build.asfiroth.home` when access is
+configured. Do not bundle Apple SDK files in project releases. Retain dependency
+licenses and audit redistribution eligibility before publishing binaries.
 
 | Interface | Minimum required behavior | Validation |
 | --- | --- | --- |
@@ -299,7 +360,10 @@ Early unsigned-build experiments may use a version-specific signing bypass. Veri
 
 ### 4.7 Signing, deployment, Rider, and Uno
 
-First use backend signing and device utilities directly against the produced bundle. Reuse omarchy provisioning helpers, `rcodesign`/selected signing implementation, and `pymobiledevice3` or its validated deployment wrapper. Pin all versions, including Python dependencies.
+First use project-owned signing and device utilities directly against the
+produced bundle. Stage the independently pinned `rcodesign` signing
+implementation and `pymobiledevice3` deployment dependency through this
+repository. Pin all versions, including Python dependencies.
 
 Require a development identity with its private key, matching provisioning profile, bundle ID, permitted device, team, capabilities, and unexpired validity. Start with user-provided credentials/profiles; account automation is optional later. Sign embedded frameworks/libraries in the required order and verify the final bundle. Do not edit resources after signing. Keep private keys, passwords, tokens, profiles, and pairing records out of source control and public receipts.
 
@@ -339,6 +403,13 @@ Direct downloads use randomized reserved files, verify hashes before publication
 and atomically publish without replacing a concurrent path. Staged directories
 use the same no-clobber rule except for explicit replacement of a verified
 project-owned SDK or synthetic bundle, which uses an atomic directory exchange.
+The Mono AOT compiler is built in a temporary sibling cache directory and is
+published only after its normalized-prefix output hash, matched LLVM payload,
+and complete verified provenance record pass. A compiler executable without that
+record is incomplete and is discarded rather than reused. The compiler's
+source/build/install/LLVM prefixes and locale/time inputs are normalized; the
+locked compiler output is accepted only after cross-prefix reproducibility
+validation.
 `doctor` verifies any installer-owned SDK receipt, the selected pre-existing SDK
 when reused, durable file/symlink/mode inventory, workload transaction, all
 direct package hashes and official signatures, tool versions, LLVM support,
@@ -426,12 +497,12 @@ Public CI runs SDK-free tests. Private SDK/device tests are explicit gates with 
 
 ### Acceptance command contracts
 
-These command contracts pass in the isolated lifecycle gate; the build command also passes with the private imported SDK and proven AOT pack:
+These command contracts pass in the isolated writable-root lifecycle gate; the build command also passes with the private imported SDK and proven AOT pack:
 
 ```sh
 dotnet --info
 dotnet workload list
-dotnet workload install ios
+dotnet workload install ios macos maccatalyst tvos
 dotnet workload restore tests/HelloIos/HelloIos.csproj
 dotnet restore tests/HelloIos/HelloIos.csproj -p:TargetFramework=net10.0-ios -r ios-arm64
 dotnet build tests/HelloIos/HelloIos.csproj -f net10.0-ios -r ios-arm64 -c Release
@@ -497,7 +568,6 @@ evidence-bearing references. Public links below provide upstream context; when a
 link informs a durable claim, record its immutable revision or package hash in
 the lock and its observed result in a receipt.
 
-- [omarchy-apple-dev](https://github.com/joshuaswarren/omarchy-apple-dev): backend reuse candidate and its own reported test matrix; not evidence of .NET support.
 - [.NET workload manifest design](https://github.com/dotnet/designs/blob/main/accepted/2020/workloads/workload-manifest.md): manifest concepts; validate implementation details in the pinned SDK.
 - [dotnet workload install](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-workload-install): standard installation and version-selection behavior.
 - [Mono CMake source](https://github.com/dotnet/runtime/blob/main/src/mono/CMakeLists.txt): compiler host/target investigation starting point.

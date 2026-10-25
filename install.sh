@@ -18,6 +18,7 @@ usage() {
 Usage:
   ./install.sh install --xcode-archive /path/to/Xcode.xip [options]
   ./install.sh doctor
+  ./install.sh preflight [--rollback-snapshot /absolute/path]
   ./install.sh uninstall [--yes] [--purge-cache]
 
 Install options:
@@ -26,8 +27,15 @@ Install options:
   --aot-pack PATH       Reuse a locally built LLVM AOT pack layout.
   --jobs COUNT          Runtime compiler build parallelism.
   --offline             Forbid external downloads; require complete caches.
+  --keep-existing ID    Preserve an existing direct Apple workload registration
+                        instead of replacing it. Repeat for ios, macos,
+                        maccatalyst, or tvos. Kept registrations remain
+                        external and unqualified by this project.
   --yes                 Do not prompt before host-root or privilege changes.
   --dry-run             Print paths and planned operations without changing them.
+  --rollback-snapshot PATH
+                        Create a verified full-root rollback snapshot at this
+                        new external path. Valid only with preflight.
 
 The host SDK/workload root is resolved from the real dotnet command. Durable
 components are installed below ${XDG_DATA_HOME:-~/.local/share}/dotnet-ios-linux;
@@ -42,7 +50,7 @@ EOF
 }
 
 command_name="install"
-if (($#)) && [[ "$1" =~ ^(install|setup|doctor|uninstall)$ ]]; then
+if (($#)) && [[ "$1" =~ ^(install|setup|doctor|preflight|uninstall)$ ]]; then
     command_name="$1"
     [[ "$command_name" != setup ]] || command_name="install"
     shift
@@ -56,6 +64,9 @@ assume_yes=false
 yes_supplied=false
 dry_run=false
 purge_cache=false
+rollback_snapshot=""
+declare -a keep_existing_workloads=()
+keep_existing_supplied=false
 while (($#)); do
     case "$1" in
         --xcode-archive) xcode_archive="${2:?missing value for --xcode-archive}"; shift 2 ;;
@@ -64,6 +75,8 @@ while (($#)); do
         --offline) offline=true; shift ;;
         --yes) assume_yes=true; yes_supplied=true; shift ;;
         --dry-run) dry_run=true; shift ;;
+        --rollback-snapshot) rollback_snapshot="${2:?missing value for --rollback-snapshot}"; shift 2 ;;
+        --keep-existing) keep_existing_workloads+=("${2:?missing value for --keep-existing}"); keep_existing_supplied=true; shift 2 ;;
         --purge-cache) purge_cache=true; shift ;;
         --help|-h) usage; exit 0 ;;
         *) printf 'unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -73,22 +86,61 @@ done
 case "$command_name" in
     install)
         [[ "$purge_cache" == false ]] || { printf -- '--purge-cache is valid only with uninstall\n' >&2; exit 2; }
+        [[ -z "$rollback_snapshot" ]] || {
+            printf -- '--rollback-snapshot is valid only with preflight\n' >&2
+            exit 2
+        }
         ;;
     doctor)
         if [[ -n "$xcode_archive" || -n "$aot_pack" || "$offline" == true || "$dry_run" == true ||
-              "$purge_cache" == true || "$yes_supplied" == true || "$jobs_supplied" == true ]]; then
+              "$purge_cache" == true || "$yes_supplied" == true || "$jobs_supplied" == true ||
+               -n "$rollback_snapshot" || "$keep_existing_supplied" == true ]]; then
             printf 'doctor does not accept lifecycle options\n' >&2
+            exit 2
+        fi
+        ;;
+    preflight)
+        if [[ -n "$xcode_archive" || -n "$aot_pack" || "$offline" == true || "$dry_run" == true ||
+               "$purge_cache" == true || "$yes_supplied" == true || "$jobs_supplied" == true || "$keep_existing_supplied" == true ]]; then
+            printf 'preflight accepts only --rollback-snapshot\n' >&2
             exit 2
         fi
         ;;
     uninstall)
         if [[ -n "$xcode_archive" || -n "$aot_pack" || "$offline" == true || "$dry_run" == true ||
-              "$jobs_supplied" == true ]]; then
+               "$jobs_supplied" == true || -n "$rollback_snapshot" || "$keep_existing_supplied" == true ]]; then
             printf 'install-only options were supplied to uninstall\n' >&2
             exit 2
         fi
         ;;
 esac
+
+declare -a direct_apple_workloads=(ios macos maccatalyst tvos)
+declare -a managed_workloads=()
+declare -a kept_workloads=()
+normalise_workload_plan() {
+    local item existing supported=false
+    kept_workloads=()
+    for item in "${keep_existing_workloads[@]}"; do
+        case "$item" in ios|macos|maccatalyst|tvos) ;; *)
+            printf '%s is not a direct managed Apple workload for --keep-existing\n' "$item" >&2
+            return 1 ;; esac
+        for existing in "${kept_workloads[@]}"; do
+            [[ "$existing" != "$item" ]] || {
+                printf 'duplicate --keep-existing workload: %s\n' "$item" >&2; return 1;
+            }
+        done
+        kept_workloads+=("$item")
+    done
+    managed_workloads=()
+    for item in "${direct_apple_workloads[@]}"; do
+        supported=false
+        for existing in "${kept_workloads[@]}"; do [[ "$existing" == "$item" ]] && supported=true; done
+        [[ "$supported" == true ]] || managed_workloads+=("$item")
+    done
+}
+normalise_workload_plan
+requested_kept_workloads_csv="$(IFS=,; printf '%s' "${kept_workloads[*]}")"
 
 [[ -n "${HOME:-}" && "$HOME" == /* ]] || { printf 'HOME must be an absolute path\n' >&2; exit 1; }
 if [[ -n "${XDG_DATA_HOME:-}" && "$XDG_DATA_HOME" != /* ]]; then
@@ -131,6 +183,8 @@ readonly marker="$data_root/.dotnet-ios-linux.json"
 readonly receipt="$data_root/receipts/install.json"
 readonly sdk_receipt="$data_root/receipts/dotnet-sdk.json"
 readonly workload_transaction="$data_root/receipts/workload-transaction"
+readonly host_root_snapshotter="$script_dir/eng/install/host-root-snapshot.py"
+readonly apple_workload_inventory="$script_dir/eng/install/apple-workload-inventory.py"
 readonly control_root="$data_root/control"
 readonly bundle_builder="$script_dir/eng/workload/build-workload-bundle.py"
 readonly system_helper_source="$script_dir/eng/install/system-workload-helper.py"
@@ -158,6 +212,19 @@ import sys
 if sys.version_info < (3, 10):
     raise SystemExit("Python 3.10 or newer is required to run the bootstrap")
 PY
+
+if [[ "$command_name" == preflight ]]; then
+    if [[ -n "$rollback_snapshot" ]]; then
+        python3 "$host_root_snapshotter" snapshot --root "$dotnet_root" \
+            --output "$rollback_snapshot"
+        python3 "$apple_workload_inventory" --root "$dotnet_root" --format key-value
+        python3 "$host_root_snapshotter" verify --root "$dotnet_root" \
+            --snapshot "$rollback_snapshot"
+    else
+        python3 "$apple_workload_inventory" --root "$dotnet_root"
+    fi
+    exit 0
+fi
 
 declare -A lock_values=()
 declare -A install_context=()
@@ -207,6 +274,7 @@ readonly supported_xcode_version="${lock_values[supported_xcode_version]}"
 readonly supported_ios_sdk_version="${lock_values[supported_ios_sdk_version]}"
 readonly locked_xcode_sha256="${lock_values[locked_xcode_sha256]}"
 readonly swift_version="${lock_values[swift_version]}"
+readonly binutils_version="${lock_values[binutils_version]}"
 readonly xtool_revision_short="${lock_values[xtool_revision_short]}"
 readonly python_version="${lock_values[python_version]}"
 readonly pymobiledevice3_version="${lock_values[pymobiledevice3_version]}"
@@ -214,6 +282,18 @@ readonly rcodesign_version="${lock_values[rcodesign_version]}"
 readonly sdk_archive="$cache_root/downloads/${lock_values[sdk_archive]}"
 readonly manifest_archive="$cache_root/downloads/${lock_values[manifest_archive]}"
 readonly workload_set_archive="$cache_root/downloads/${lock_values[workload_package_archive]}"
+readonly macos_manifest_url="${lock_values[macos_manifest_url]}"
+readonly macos_manifest_sha512="${lock_values[macos_manifest_sha512]}"
+readonly macos_manifest_sha512_base64="${lock_values[macos_manifest_sha512_base64]}"
+readonly macos_manifest_archive="$cache_root/downloads/${lock_values[macos_manifest_archive]}"
+readonly maccatalyst_manifest_url="${lock_values[maccatalyst_manifest_url]}"
+readonly maccatalyst_manifest_sha512="${lock_values[maccatalyst_manifest_sha512]}"
+readonly maccatalyst_manifest_sha512_base64="${lock_values[maccatalyst_manifest_sha512_base64]}"
+readonly maccatalyst_manifest_archive="$cache_root/downloads/${lock_values[maccatalyst_manifest_archive]}"
+readonly tvos_manifest_url="${lock_values[tvos_manifest_url]}"
+readonly tvos_manifest_sha512="${lock_values[tvos_manifest_sha512]}"
+readonly tvos_manifest_sha512_base64="${lock_values[tvos_manifest_sha512_base64]}"
+readonly tvos_manifest_archive="$cache_root/downloads/${lock_values[tvos_manifest_archive]}"
 lock_sha256="$(sha256sum -b "$lock_path" | cut -d' ' -f1)"
 readonly current_system_helper_version="$(python3 - \
     "$system_helper_source" "$transaction_source" "$atomic_source" "$lock_path" <<'PY'
@@ -254,6 +334,8 @@ system_transaction_id=""
 workload_bundle=""
 system_helper_transaction_active=false
 workload_manifest=""
+managed_workloads_csv=""
+kept_workloads_csv=""
 user_root_lock_acquired=false
 shared_consumers=0
 declare -a bundle_package_paths=()
@@ -275,6 +357,121 @@ set_install_paths() {
     install_id="$project_version-sdk-$sdk_version"
     feed="$data_root/feeds/$install_id"
     toolchain="$data_root/toolchains/$install_id"
+}
+
+workload_manifest_id() {
+    local package_id
+    case "$1" in
+        ios) package_id="${lock_values[manifest_id]}" ;;
+        macos) package_id="${lock_values[macos_manifest_id]}" ;;
+        maccatalyst) package_id="${lock_values[maccatalyst_manifest_id]}" ;;
+        tvos) package_id="${lock_values[tvos_manifest_id]}" ;;
+        *) return 1 ;;
+    esac
+    printf '%s\n' "${package_id%.Manifest-*}"
+}
+
+workload_manifest_identity() {
+    case "$1" in
+        ios) printf '%s/%s\n' "$manifest_version" "$manifest_suffix" ;;
+        macos) printf '%s/%s\n' "${lock_values[macos_manifest_version]}" "$manifest_suffix" ;;
+        maccatalyst) printf '%s/%s\n' "${lock_values[maccatalyst_manifest_version]}" "$manifest_suffix" ;;
+        tvos) printf '%s/%s\n' "${lock_values[tvos_manifest_version]}" "$manifest_suffix" ;;
+        *) return 1 ;;
+    esac
+}
+
+workload_csv() {
+    local IFS=,
+    printf '%s' "$*"
+}
+
+set_workload_plan_strings() {
+    managed_workloads_csv="$(workload_csv "${managed_workloads[@]}")"
+    kept_workloads_csv="$(workload_csv "${kept_workloads[@]}")"
+}
+
+workload_is_managed() {
+    [[ ",${managed_workloads_csv}," == *,"$1",* ]]
+}
+
+assert_kept_registrations_exist() {
+    ((${#kept_workloads[@]})) || return 0
+    local workload descriptors=""
+    for workload in "${kept_workloads[@]}"; do
+        descriptors+="${workload}:$(workload_manifest_id "$workload"):$(workload_manifest_identity "$workload"),"
+    done
+    python3 - "$dotnet_root" "$sdk_feature_band" "$descriptors" <<'PY'
+import json, re, sys
+from pathlib import Path
+root=Path(sys.argv[1]); sdk_band=sys.argv[2]
+requested=[]
+for raw in (item for item in sys.argv[3].split(',') if item):
+    workload, manifest_id, identity = raw.split(':', 2)
+    version, manifest_band = identity.split('/', 1)
+    requested.append((workload, manifest_id, version, manifest_band))
+
+def child(parent, name):
+    if parent.is_symlink() or not parent.is_dir(): return None
+    matches=[item for item in parent.iterdir() if item.name.casefold()==name.casefold()]
+    if len(matches)>1: raise SystemExit(f'--keep-existing metadata case-collides under {parent}')
+    if not matches: return None
+    result=matches[0]
+    if result.is_symlink() or not result.is_dir():
+        raise SystemExit(f'--keep-existing metadata is not a real directory: {result}')
+    return result
+
+def safe_directory(path, label):
+    if path.is_symlink() or not path.is_dir():
+        raise SystemExit(f'--keep-existing {label} is not a real directory: {path}')
+    return path
+
+def marker_paths(workload):
+    metadata=safe_directory(root/'metadata', 'metadata root')
+    workloads_root=safe_directory(metadata/'workloads', 'workload metadata root')
+    found=[]
+    for directory, directories, files in __import__('os').walk(workloads_root, topdown=True, followlinks=False):
+        current=Path(directory)
+        if any((current/name).is_symlink() for name in [*directories,*files]):
+            raise SystemExit(f'--keep-existing workload metadata contains a symlink: {current}')
+        if current.name.casefold() != 'installedworkloads':
+            continue
+        scope=current.relative_to(workloads_root).parts[:-1]
+        if scope.count(sdk_band) != 1:
+            continue
+        for name in files:
+            marker=current/name
+            if name.casefold() == workload.casefold() and marker.is_file():
+                found.append(marker)
+    return found
+
+for workload, manifest_id, version, manifest_band in requested:
+    markers=marker_paths(workload)
+    if len(markers) != 1:
+        raise SystemExit('requested --keep-existing workload is not registered for the selected SDK feature band: '+workload)
+    registry=child(root/'metadata'/'workloads'/'InstalledManifests'/'v1', manifest_id)
+    records=[]
+    if registry:
+        for candidate_version in registry.iterdir():
+            if candidate_version.is_symlink() or not candidate_version.is_dir(): continue
+            for candidate_band in candidate_version.iterdir():
+                leaf=candidate_band/sdk_band
+                if candidate_band.is_symlink() or not candidate_band.is_dir(): continue
+                if leaf.is_file() and not leaf.is_symlink(): records.append((candidate_version.name,candidate_band.name))
+    if records != [(version, manifest_band)]:
+        raise SystemExit(
+            f'--keep-existing {workload} is not the exact locked manifest identity; refusing to reconcile an external registration'
+        )
+    manifest_root=child(safe_directory(root/'sdk-manifests'/manifest_band, 'SDK manifest feature band'), manifest_id)
+    manifest_version=child(manifest_root, version) if manifest_root else None
+    manifest=manifest_version/'WorkloadManifest.json' if manifest_version else None
+    try:
+        value=json.loads(re.sub(r',(?=\s*[}\]])','',manifest.read_text(encoding='utf-8-sig')))
+        if not isinstance(value.get('workloads'),dict) or workload not in value['workloads']:
+            raise ValueError('direct workload is missing')
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        raise SystemExit(f'--keep-existing {workload} has no safe matching manifest: {error}')
+PY
 }
 
 xcode_is_compatible() {
@@ -308,6 +505,14 @@ resolve_privilege_mode() {
                 "$workload_fallback_version" "$workload_set_version" >&2
             return 1
         }
+        ((${#kept_workloads[@]} == 0)) || {
+            printf '%s\n' '--keep-existing is not supported for a system root; the iOS-only helper cannot protect external Apple registrations' >&2
+            return 1
+        }
+        # The privileged helper deliberately remains on its proven iOS-only
+        # transaction until it has equivalent aggregate restoration semantics.
+        managed_workloads=(ios)
+        set_workload_plan_strings
     else
         privilege_mode="user"
         system_transaction_id=""
@@ -320,11 +525,16 @@ resolve_new_install_context() {
     sdk_version="${install_context[sdk_version]}"
     sdk_source="${install_context[sdk_source]}"
     read_resolved_pairs install_context workload --root "$dotnet_root" \
-        --feature-band "$sdk_feature_band" --manifest-version "$manifest_version" \
-        --manifest-suffix "$manifest_suffix" --fallback "$workload_fallback_version"
+        --feature-band "$sdk_feature_band" \
+        --manifest "$(workload_manifest_id ios)=$manifest_version/$manifest_suffix" \
+        --manifest "$(workload_manifest_id macos)=${lock_values[macos_manifest_version]}/$manifest_suffix" \
+        --manifest "$(workload_manifest_id maccatalyst)=${lock_values[maccatalyst_manifest_version]}/$manifest_suffix" \
+        --manifest "$(workload_manifest_id tvos)=${lock_values[tvos_manifest_version]}/$manifest_suffix" \
+        --fallback "$workload_fallback_version"
     workload_set_version="${install_context[workload_version]}"
     workload_source="${install_context[workload_source]}"
     workload_manifest="$manifest_version/$manifest_suffix"
+    set_workload_plan_strings
     set_install_paths
     resolve_privilege_mode
 }
@@ -365,6 +575,16 @@ if manifest is not None:
     if not isinstance(manifest,str) or not manifest or "\x00" in manifest:
         raise SystemExit("installation context has an invalid workload manifest")
     sys.stdout.buffer.write(b"workloadManifest\0"+manifest.encode()+b"\0")
+for key in ("managedWorkloads", "keptWorkloads"):
+    items=value.get(key)
+    if items is None:
+        # Receipts created before direct companion registration managed only iOS.
+        items=["ios"] if key == "managedWorkloads" else []
+    if not isinstance(items,list) or not all(isinstance(item,str) and item in {"ios","macos","maccatalyst","tvos"} for item in items):
+        raise SystemExit(f"installation context has invalid {key}")
+    if len(items) != len(set(items)):
+        raise SystemExit(f"installation context has duplicate {key}")
+    sys.stdout.buffer.write(key.encode()+b"\0"+','.join(items).encode()+b"\0")
 for key in ("sdkSource","workloadSource"):
     item=value.get(key)
     if isinstance(item,str) and item:
@@ -393,6 +613,21 @@ PY
     privilege_mode="${install_context[privilegeMode]}"
     system_transaction_id="${install_context[systemTransactionId]:-}"
     workload_manifest="${install_context[workloadManifest]:-$manifest_version/$manifest_suffix}"
+    if [[ -v 'install_context[managedWorkloads]' ]]; then
+        managed_workloads=()
+        if [[ -n "${install_context[managedWorkloads]}" ]]; then
+            IFS=',' read -r -a managed_workloads <<< "${install_context[managedWorkloads]}"
+        fi
+    else
+        # Receipts created before direct companion registration owned iOS only.
+        managed_workloads=(ios)
+    fi
+    if [[ -n "${install_context[keptWorkloads]:-}" ]]; then
+        IFS=',' read -r -a kept_workloads <<< "${install_context[keptWorkloads]}"
+    else
+        kept_workloads=()
+    fi
+    set_workload_plan_strings
     if [[ "$privilege_mode" == system-helper ]]; then
         set_system_helper_paths "${install_context[systemHelperVersion]:-}"
     fi
@@ -495,6 +730,102 @@ PY
     validate_cache_root
 }
 
+ensure_owned_cache_directory() {
+    local directory="$1" parent
+    [[ "$directory" == "$cache_root/"* ]] || {
+        printf 'refusing to create a cache directory outside %s: %s\n' "$cache_root" "$directory" >&2
+        return 1
+    }
+    parent="$(dirname "$directory")"
+    [[ -d "$parent" && ! -L "$parent" ]] || {
+        printf 'cache directory parent is unsafe: %s\n' "$parent" >&2
+        return 1
+    }
+    if [[ -e "$directory" || -L "$directory" ]]; then
+        [[ -d "$directory" && ! -L "$directory" ]] || {
+            printf 'cache directory is unsafe: %s\n' "$directory" >&2
+            return 1
+        }
+    else
+        mkdir "$directory"
+    fi
+}
+
+verify_compiler_cache() {
+    local compiler_root="$1" llvm_root="$2"
+    "$script_dir/eng/runtime/package-aot-pack.py" \
+        --verify-compiler-cache --compiler "$compiler_root/install/bin/mono-aot-cross" \
+        --runtime-commit "$runtime_commit" --llvm-root "$llvm_root" >/dev/null
+}
+
+verify_aot_pack_cache() {
+    local aot_pack_root="$1"
+    "$script_dir/eng/runtime/package-aot-pack.py" --verify-aot-pack "$aot_pack_root" >/dev/null
+}
+
+discard_build_cache() {
+    local cache_entry="$1" expected_prefix="$2"
+    python3 - "$script_dir/eng/common" "$cache_root" "$cache_entry" "$expected_prefix" <<'PY'
+import os
+import sys
+import uuid
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from atomic import durable_remove
+
+cache_root = Path(sys.argv[2])
+candidate = Path(sys.argv[3])
+expected_prefix = sys.argv[4]
+expected_parent = cache_root / "build"
+if candidate.parent != expected_parent or not candidate.name.startswith(expected_prefix):
+    raise SystemExit(f"refusing to discard a project build cache outside {expected_parent}: {candidate}")
+if not os.path.lexists(candidate):
+    raise SystemExit(0)
+if expected_parent.is_symlink() or not expected_parent.is_dir():
+    raise SystemExit(f"project build-cache parent is unsafe: {expected_parent}")
+tombstone = expected_parent / f".{candidate.name}.rejected-{uuid.uuid4().hex}"
+durable_remove(candidate, tombstone)
+PY
+}
+
+build_and_publish_compiler_cache() {
+    local compiler_root="$1" runtime_source="$2" llvm_root="$3" stage
+    if [[ -e "$cache_root/build" || -L "$cache_root/build" ]]; then
+        [[ -d "$cache_root/build" && ! -L "$cache_root/build" ]] || {
+            printf 'project build-cache directory is unsafe: %s\n' "$cache_root/build" >&2
+            return 1
+        }
+    else
+        mkdir "$cache_root/build"
+    fi
+    stage="$(mktemp -d "$cache_root/build/.${compiler_root##*/}.stage.XXXXXX")"
+    if ! "$script_dir/eng/runtime/build-mono-aot-cross.sh" --source "$runtime_source" \
+        --build "$stage/build" --install "$stage/install" --llvm-root "$llvm_root" --jobs "$jobs"; then
+        rm -rf -- "$stage"
+        return 1
+    fi
+    if ! "$script_dir/eng/runtime/package-aot-pack.py" --verify-compiler-cache \
+        --compiler "$stage/install/bin/mono-aot-cross" --runtime-commit "$runtime_commit" \
+        --llvm-root "$llvm_root"; then
+        rm -rf -- "$stage"
+        return 1
+    fi
+    if ! python3 - "$script_dir/eng/common" "$stage" "$compiler_root" <<'PY'
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from atomic import publish_directory_noreplace
+
+publish_directory_noreplace(Path(sys.argv[2]), Path(sys.argv[3]))
+PY
+    then
+        rm -rf -- "$stage"
+        return 1
+    fi
+}
+
 activate_environment() {
     export DOTNET_ROOT="$dotnet_root"
     export DOTNET_CLI_HOME="$cache_root/dotnet-cli-home"
@@ -511,7 +842,7 @@ activate_environment() {
 
 doctor() {
     local expected_status="${1:-complete}"
-    local actual_sdk actual_workload actual_xcode actual_sdk_version swift_major_minor helper_output
+    local actual_sdk actual_workload actual_xcode actual_sdk_version swift_major_minor helper_output workload_list workload expected_manifest
     [[ -f "$marker" && -f "$receipt" ]] || { printf 'dotnet-ios-linux is not installed under %s\n' "$data_root" >&2; return 1; }
     [[ "$(read_marker_status)" == "$expected_status" ]] || { printf 'installation is incomplete; rerun install\n' >&2; return 1; }
     python3 - "$receipt" "$lock_sha256" <<'PY'
@@ -548,17 +879,31 @@ PY
         }
         actual_workload="$(sed -n 's/^workload_set=//p' <<<"$helper_output")"
     else
-        "$script_dir/eng/install/workload-transaction.py" verify \
-            --root "$dotnet_root" --transaction "$workload_transaction" >/dev/null
+        if ((${#managed_workloads[@]})); then
+            "$script_dir/eng/install/workload-transaction.py" verify \
+                --root "$dotnet_root" --transaction "$workload_transaction" >/dev/null
+        fi
         actual_workload="$(cd "$control_root" && "$dotnet_root/dotnet" workload --version)"
-        (cd "$control_root" && "$dotnet_root/dotnet" workload list) |
-            awk -v expected="$workload_manifest" \
-                '$1 == "ios" && $2 == expected { found=1 } END { exit !found }' || {
-            printf 'the pinned ios workload is not installed\n' >&2; return 1;
-        }
+        workload_list="$(cd "$control_root" && "$dotnet_root/dotnet" workload list)"
+        for workload in "${managed_workloads[@]}"; do
+            expected_manifest="$(workload_manifest_identity "$workload")"
+            awk -v workload="$workload" -v expected="$expected_manifest" \
+                '$1 == workload && $2 == expected { found=1 } END { exit !found }' <<<"$workload_list" || {
+                printf 'the managed %s workload is not installed at %s\n' "$workload" "$expected_manifest" >&2; return 1;
+            }
+        done
+        for workload in "${kept_workloads[@]}"; do
+            awk -v workload="$workload" '$1 == workload { found=1 } END { exit !found }' <<<"$workload_list" || {
+                printf 'the kept external %s workload is no longer registered\n' "$workload" >&2; return 1;
+            }
+        done
     fi
-    "$script_dir/eng/install/verify-workload-packages.py" --root "$dotnet_root" \
-        --feed "$feed" --lock "$lock_path" --dotnet "$dotnet_root/dotnet" >/dev/null
+    if ((${#managed_workloads[@]})); then
+        verify_workload_args=()
+        for workload in "${managed_workloads[@]}"; do verify_workload_args+=(--workload "$workload"); done
+        python3 "$script_dir/eng/install/verify-workload-packages.py" --root "$dotnet_root" \
+            --feed "$feed" --lock "$lock_path" --dotnet "$dotnet_root/dotnet" "${verify_workload_args[@]}" >/dev/null
+    fi
     actual_sdk="$(cd "$control_root" && "$dotnet_root/dotnet" --version)"
     [[ "$actual_sdk" == "$sdk_version" ]] || {
         printf 'selected .NET SDK is %s, expected installed SDK %s\n' "$actual_sdk" "$sdk_version" >&2
@@ -568,10 +913,12 @@ PY
         printf 'selected workload set is %s, expected %s\n' "$actual_workload" "$workload_set_version" >&2
         return 1
     }
-    "$dotnet_root/packs/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/$project_version/tools/mono-aot-cross" --version |
-        grep -Eq "LLVM:[[:space:]]+yes\\($((llvm_major * 100))\\)" || {
-            printf 'LLVM-enabled iOS AOT compiler validation failed\n' >&2; return 1;
-        }
+    if [[ ",${managed_workloads_csv}," == *,ios,* ]]; then
+        "$dotnet_root/packs/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/$project_version/tools/mono-aot-cross" --version |
+            grep -Eq "LLVM:[[:space:]]+yes\\($((llvm_major * 100))\\)" || {
+                printf 'LLVM-enabled iOS AOT compiler validation failed\n' >&2; return 1;
+            }
+    fi
     swift_major_minor="${swift_version%.*}"
     "$toolchain/swift-$swift_version/usr/bin/swift" --version | head -n1 |
         grep -Fq "Swift version $swift_major_minor" || {
@@ -888,12 +1235,15 @@ workload_set=$workload_set_version
 workload_set_source=$workload_source
 privilege_mode=$privilege_mode
 sudo_required=$([[ "$privilege_mode" == system-helper ]] && printf true || printf false)
+managed_workloads=$managed_workloads_csv
+kept_workloads=$kept_workloads_csv
+registration_scope=$([[ "$privilege_mode" == system-helper ]] && printf system-root-ios-only || printf writable-root-direct-apple)
 data_root=$data_root
 cache_root=$cache_root
 xcode_archive=$(basename "$xcode_archive")
 offline=$offline
 runtime_source=$([[ -n "$aot_pack" ]] && printf reused-local-aot-pack || printf build-pinned-source-with-llvm)
-planned=compatible SDK selection; Xcode/workload compatibility check; Xcode SDK import; host-tool staging; pinned iOS workload install; activation
+planned=compatible SDK selection; Xcode/workload compatibility check; Xcode SDK import; host-tool staging; pinned direct Apple workload registration; activation
 EOF
     exit 0
 fi
@@ -909,6 +1259,13 @@ initialize_cache_root
 }
 exec 9>"$cache_root/install.lock"
 flock -n 9 || { printf 'another dotnet-ios-linux lifecycle operation is active\n' >&2; exit 1; }
+for cache_directory in \
+    "$cache_root/downloads" "$cache_root/build" "$cache_root/sources" "$cache_root/nuget" \
+    "$cache_root/nuget/packages" "$cache_root/nuget/llvm" "$cache_root/dotnet-cli-home" \
+    "$cache_root/workload-bundles" "$cache_root/workload-temp" "$cache_root/swiftpm" \
+    "$cache_root/uv" "$cache_root/downloads/workload-bundle-packages"; do
+    ensure_owned_cache_directory "$cache_directory"
+done
 
 if [[ "$command_name" == doctor ]]; then
     [[ -f "$receipt" ]] || { printf 'dotnet-ios-linux is not installed under %s\n' "$data_root" >&2; exit 1; }
@@ -928,7 +1285,7 @@ if [[ "$command_name" == uninstall ]]; then
     [[ -f "$receipt" ]] || { printf 'installation receipt is missing: %s\n' "$receipt" >&2; exit 1; }
     load_owned_context "$receipt"
     acquire_user_root_lock
-    confirm "Remove the owned iOS workload and durable dotnet-ios-linux data?"
+    confirm "Restore replaced managed Apple workloads and remove durable dotnet-ios-linux data?"
     if [[ "$marker_status" == complete ]]; then
         "$script_dir/eng/install/durable-assets.py" verify --root "$data_root" --receipt "$receipt"
         set_marker_state complete uninstalling prepared
@@ -949,19 +1306,21 @@ if [[ "$command_name" == uninstall ]]; then
                 --workload-manifest "$workload_manifest" \
                 --ownership-token "$system_transaction_id"
         else
-            transaction_status="$("$script_dir/eng/install/workload-transaction.py" status \
-                --root "$dotnet_root" --transaction "$workload_transaction")"
-            if [[ "$transaction_status" == committed ]]; then
-                "$script_dir/eng/install/workload-transaction.py" prepare-uninstall \
-                    --root "$dotnet_root" --transaction "$workload_transaction"
-            elif [[ "$transaction_status" != uninstalling && "$transaction_status" != restoring && \
-                    "$transaction_status" != restored ]]; then
-                printf 'cannot uninstall a workload transaction in state %s\n' "$transaction_status" >&2
-                exit 1
-            fi
-            if [[ "$transaction_status" != restored ]]; then
-                "$script_dir/eng/install/workload-transaction.py" restore-retain \
-                    --root "$dotnet_root" --transaction "$workload_transaction"
+            if [[ -d "$workload_transaction" ]]; then
+                transaction_status="$("$script_dir/eng/install/workload-transaction.py" status \
+                    --root "$dotnet_root" --transaction "$workload_transaction")"
+                if [[ "$transaction_status" == committed ]]; then
+                    "$script_dir/eng/install/workload-transaction.py" prepare-uninstall \
+                        --root "$dotnet_root" --transaction "$workload_transaction"
+                elif [[ "$transaction_status" != uninstalling && "$transaction_status" != restoring && \
+                        "$transaction_status" != restored ]]; then
+                    printf 'cannot uninstall a workload transaction in state %s\n' "$transaction_status" >&2
+                    exit 1
+                fi
+                if [[ "$transaction_status" != restored ]]; then
+                    "$script_dir/eng/install/workload-transaction.py" restore-retain \
+                        --root "$dotnet_root" --transaction "$workload_transaction"
+                fi
             fi
         fi
         set_marker_state uninstalling uninstalling workload-removed
@@ -1032,6 +1391,10 @@ fi
 if [[ -f "$marker" && "$(read_marker_status)" == complete ]]; then
     [[ -f "$receipt" ]] || { printf 'installation receipt is missing: %s\n' "$receipt" >&2; exit 1; }
     load_owned_context "$receipt"
+    if [[ "$keep_existing_supplied" == true && "$requested_kept_workloads_csv" != "$kept_workloads_csv" ]]; then
+        printf 'the requested --keep-existing policy differs from the completed installation; uninstall before changing workload ownership\n' >&2
+        exit 2
+    fi
     acquire_user_root_lock
     doctor
     exit 0
@@ -1050,6 +1413,10 @@ if [[ -e "$data_root" ]]; then
     status="$(read_marker_status)"
     if [[ "$status" == complete ]]; then
         load_owned_context "$receipt"
+        if [[ "$keep_existing_supplied" == true && "$requested_kept_workloads_csv" != "$kept_workloads_csv" ]]; then
+            printf 'the requested --keep-existing policy differs from the completed installation; uninstall before changing workload ownership\n' >&2
+            exit 2
+        fi
         doctor
         exit 0
     fi
@@ -1063,15 +1430,26 @@ if [[ -e "$data_root" ]]; then
     fi
     acquire_user_root_lock
     printf 'Recovering an interrupted installation...\n'
+    shared_consumers=0
     if [[ "$privilege_mode" == system-helper ]]; then
         install_system_helper
         run_system_helper recover --ownership-token "$system_transaction_id"
     elif [[ -d "$workload_transaction" ]]; then
-        "$script_dir/eng/install/workload-transaction.py" restore --root "$dotnet_root" --transaction "$workload_transaction"
+        # Keep the restored transaction long enough to query retained shared
+        # workload-set consumers before deciding whether the SDK receipt may be
+        # removed. A plain restore finalizes (deletes) it first.
+        "$script_dir/eng/install/workload-transaction.py" restore-retain --root "$dotnet_root" --transaction "$workload_transaction"
+        shared_consumers="$("$script_dir/eng/install/workload-transaction.py" shared-consumers \
+            --root "$dotnet_root" --transaction "$workload_transaction")"
     fi
     if [[ -f "$sdk_receipt" ]]; then
-        "$script_dir/eng/install/install-dotnet-sdk.py" uninstall --root "$dotnet_root" \
-            --receipt "$sdk_receipt" --sdk-version "$sdk_version"
+        if ((shared_consumers > 0)); then
+            "$script_dir/eng/install/install-dotnet-sdk.py" release --root "$dotnet_root" \
+                --receipt "$sdk_receipt" --sdk-version "$sdk_version"
+        else
+            "$script_dir/eng/install/install-dotnet-sdk.py" uninstall --root "$dotnet_root" \
+                --receipt "$sdk_receipt" --sdk-version "$sdk_version"
+        fi
     else
         sync_path_state "$sdk_receipt"
     fi
@@ -1084,6 +1462,8 @@ else
     resolve_new_install_context
     acquire_user_root_lock
 fi
+
+assert_kept_registrations_exist
 
 for tool in clang clang++ cmake curl file git ldd ln make ninja objcopy readelf strip tar; do need "$tool"; done
 [[ "$(uname -s) $(uname -m)" == "Linux x86_64" ]] || { printf 'only Linux x86_64 is supported\n' >&2; exit 1; }
@@ -1115,12 +1495,13 @@ if [[ "$offline" == true ]]; then
     export no_proxy=localhost,127.0.0.1 NO_PROXY=localhost,127.0.0.1
 fi
 
-mkdir -p "$data_root/receipts" "$cache_root/downloads" "$cache_root/build" "$cache_root/sources" \
-    "$cache_root/nuget/packages" "$cache_root/dotnet-cli-home" "$data_root/feeds" "$data_root/toolchains"
+mkdir -p "$data_root/receipts" "$data_root/feeds" "$data_root/toolchains"
 python3 - "$script_dir/eng/common" "$data_root" "$data_root/receipts" \
     "$data_root/feeds" "$data_root/toolchains" "$cache_root" "$cache_root/downloads" \
     "$cache_root/build" "$cache_root/sources" "$cache_root/nuget" \
-    "$cache_root/nuget/packages" "$cache_root/dotnet-cli-home" <<'PY'
+    "$cache_root/nuget/packages" "$cache_root/nuget/llvm" "$cache_root/dotnet-cli-home" \
+    "$cache_root/workload-bundles" "$cache_root/workload-temp" "$cache_root/swiftpm" \
+    "$cache_root/uv" "$cache_root/downloads/workload-bundle-packages" <<'PY'
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
@@ -1131,7 +1512,7 @@ PY
 python3 - "$marker" "$lock_sha256" "$dotnet_root" "$data_root" "$project_version" \
     "$install_id" "$sdk_version" "$workload_set_version" "$privilege_mode" \
     "$system_transaction_id" "$sdk_source" "$workload_source" "$workload_manifest" \
-    "$system_helper_version" <<'PY'
+    "$system_helper_version" "$managed_workloads_csv" "$kept_workloads_csv" <<'PY'
 import json, os, sys, tempfile
 from pathlib import Path
 path=Path(sys.argv[1])
@@ -1141,11 +1522,13 @@ value={
  "sdkVersion":sys.argv[7],"workloadSet":sys.argv[8],
  "privilegeMode":sys.argv[9],
  "sdkSource":sys.argv[11],"workloadSource":sys.argv[12],
- "workloadManifest":sys.argv[13],
+  "workloadManifest":sys.argv[13],
  "toolchainLockSha256":sys.argv[2],"dotnetRoot":sys.argv[3],"dataRoot":sys.argv[4],
 }
 if sys.argv[10]: value["systemTransactionId"]=sys.argv[10]
 if sys.argv[14]: value["systemHelperVersion"]=sys.argv[14]
+for key,index in (("managedWorkloads",15),("keptWorkloads",16)):
+    value[key]=[item for item in sys.argv[index].split(',') if item]
 descriptor,name=tempfile.mkstemp(prefix=f".{path.name}.",dir=path.parent)
 temporary=Path(name)
 try:
@@ -1161,7 +1544,7 @@ except BaseException:
 PY
 installation_active=true
 rollback_install() {
-    local exit_code="${1:-$?}" rollback_complete=true
+    local exit_code="${1:-$?}" rollback_complete=true shared_consumers=0
     trap - ERR INT TERM
     [[ "$installation_active" == true ]] || exit "$exit_code"
     printf 'Installation failed; restoring owned mutations...\n' >&2
@@ -1176,10 +1559,18 @@ rollback_install() {
         if ! "$script_dir/eng/install/workload-transaction.py" restore-retain \
             --root "$dotnet_root" --transaction "$workload_transaction"; then
             rollback_complete=false
+        else
+            shared_consumers="$("$script_dir/eng/install/workload-transaction.py" shared-consumers \
+                --root "$dotnet_root" --transaction "$workload_transaction")" || rollback_complete=false
         fi
     fi
-    if [[ -f "$sdk_receipt" ]]; then
-        if ! "$script_dir/eng/install/install-dotnet-sdk.py" uninstall --root "$dotnet_root" \
+    if [[ "$rollback_complete" == true && -f "$sdk_receipt" ]]; then
+        if ((shared_consumers > 0)); then
+            if ! "$script_dir/eng/install/install-dotnet-sdk.py" release --root "$dotnet_root" \
+                --receipt "$sdk_receipt" --sdk-version "$sdk_version"; then
+                rollback_complete=false
+            fi
+        elif ! "$script_dir/eng/install/install-dotnet-sdk.py" uninstall --root "$dotnet_root" \
             --receipt "$sdk_receipt" --sdk-version "$sdk_version"; then
             rollback_complete=false
         fi
@@ -1200,7 +1591,18 @@ trap rollback_install ERR INT TERM
 if [[ "$sdk_source" == installer ]]; then
     download_verified "$sdk_url" sha512sum "$sdk_sha512" "$sdk_archive" "$offline"
 fi
-download_verified "$manifest_url" sha512sum "$manifest_sha512" "$manifest_archive" "$offline"
+if workload_is_managed ios; then
+    download_verified "$manifest_url" sha512sum "$manifest_sha512" "$manifest_archive" "$offline"
+fi
+if workload_is_managed macos; then
+    download_verified "$macos_manifest_url" sha512sum "$macos_manifest_sha512" "$macos_manifest_archive" "$offline"
+fi
+if workload_is_managed maccatalyst; then
+    download_verified "$maccatalyst_manifest_url" sha512sum "$maccatalyst_manifest_sha512" "$maccatalyst_manifest_archive" "$offline"
+fi
+if workload_is_managed tvos; then
+    download_verified "$tvos_manifest_url" sha512sum "$tvos_manifest_sha512" "$tvos_manifest_archive" "$offline"
+fi
 if [[ "$workload_source" == installer || "$privilege_mode" == system-helper ]]; then
     download_verified "$workload_set_url" sha512sum "$workload_set_sha512" "$workload_set_archive" "$offline"
 fi
@@ -1228,11 +1630,19 @@ if [[ "$privilege_mode" == system-helper ]]; then
         bundle_package_paths+=("$bundle_path")
     done
 fi
-python3 - "$manifest_archive" "$manifest_sha512_base64" <<'PY'
+manifest_hash_args=()
+if workload_is_managed ios; then manifest_hash_args+=("$manifest_archive" "$manifest_sha512_base64"); fi
+if workload_is_managed macos; then manifest_hash_args+=("$macos_manifest_archive" "$macos_manifest_sha512_base64"); fi
+if workload_is_managed maccatalyst; then manifest_hash_args+=("$maccatalyst_manifest_archive" "$maccatalyst_manifest_sha512_base64"); fi
+if workload_is_managed tvos; then manifest_hash_args+=("$tvos_manifest_archive" "$tvos_manifest_sha512_base64"); fi
+if ((${#manifest_hash_args[@]})); then
+python3 - "${manifest_hash_args[@]}" <<'PY'
 import base64,hashlib,sys
-actual=base64.b64encode(hashlib.sha512(open(sys.argv[1],'rb').read()).digest()).decode()
-if actual != sys.argv[2]: raise SystemExit(f"official iOS manifest SHA-512 mismatch: {actual}")
+for archive,expected in zip(sys.argv[1::2],sys.argv[2::2],strict=True):
+    actual=base64.b64encode(hashlib.sha512(open(archive,'rb').read()).digest()).decode()
+    if actual != expected: raise SystemExit(f"official workload manifest SHA-512 mismatch: {archive}: {actual}")
 PY
+fi
 
 if [[ "$sdk_source" == installer ]]; then
     "$script_dir/eng/install/install-dotnet-sdk.py" install --archive "$sdk_archive" \
@@ -1254,16 +1664,22 @@ Path(sys.argv[1]).write_text(json.dumps({"sdk":{
 PY
 activate_environment
 [[ "$(cd "$control_root" && "$dotnet_root/dotnet" --version)" == "$sdk_version" ]]
-nuget_verify=("$manifest_archive")
+nuget_verify=()
+if workload_is_managed ios; then nuget_verify+=("$manifest_archive"); fi
+if workload_is_managed macos; then nuget_verify+=("$macos_manifest_archive"); fi
+if workload_is_managed maccatalyst; then nuget_verify+=("$maccatalyst_manifest_archive"); fi
+if workload_is_managed tvos; then nuget_verify+=("$tvos_manifest_archive"); fi
 if [[ "$workload_source" == installer || "$privilege_mode" == system-helper ]]; then
     nuget_verify+=("$workload_set_archive")
 fi
 if [[ "$privilege_mode" == system-helper ]]; then
     nuget_verify+=("${bundle_package_paths[@]}")
 fi
-NUGET_CERT_REVOCATION_MODE=offline "$dotnet_root/dotnet" nuget verify --all "${nuget_verify[@]}" >/dev/null
+if ((${#nuget_verify[@]})); then
+    NUGET_CERT_REVOCATION_MODE=offline "$dotnet_root/dotnet" nuget verify --all "${nuget_verify[@]}" >/dev/null
+fi
 
-if [[ -z "$aot_pack" ]]; then
+if workload_is_managed ios && [[ -z "$aot_pack" ]]; then
     llvm_root="$cache_root/build/llvm-$llvm_version"
     llvm_args=()
     [[ "$offline" == false ]] || llvm_args+=(--offline)
@@ -1279,23 +1695,41 @@ if [[ -z "$aot_pack" ]]; then
     "$script_dir/eng/runtime/acquire-runtime.sh" --destination "$runtime_source" "${runtime_args[@]}"
     "$script_dir/eng/runtime/apply-patches.sh" --source "$runtime_source"
     compiler_root="$cache_root/build/mono-aot-$runtime_commit"
-    if [[ ! -x "$compiler_root/install/bin/mono-aot-cross" ]]; then
-        "$script_dir/eng/runtime/build-mono-aot-cross.sh" --source "$runtime_source" \
-            --build "$compiler_root/build" --install "$compiler_root/install" \
-            --llvm-root "$llvm_root" --jobs "$jobs"
+    if [[ -e "$cache_root/build" || -L "$cache_root/build" ]]; then
+        [[ -d "$cache_root/build" && ! -L "$cache_root/build" ]] || {
+            printf 'project build-cache directory is unsafe: %s\n' "$cache_root/build" >&2
+            false
+        }
+    fi
+    if ! verify_compiler_cache "$compiler_root" "$llvm_root" >/dev/null 2>&1; then
+        printf 'AOT compiler cache is absent or unverified; rebuilding it\n'
+        discard_build_cache "$compiler_root" "mono-aot-"
+        build_and_publish_compiler_cache "$compiler_root" "$runtime_source" "$llvm_root"
     fi
     aot_pack="$cache_root/build/aot-pack-$runtime_commit"
-    if [[ ! -d "$aot_pack" ]]; then
+    if ! verify_aot_pack_cache "$aot_pack" >/dev/null 2>&1; then
+        printf 'AOT package cache is absent or unverified; rebuilding it\n'
+        discard_build_cache "$aot_pack" "aot-pack-"
         "$script_dir/eng/runtime/package-aot-pack.py" \
             --compiler "$compiler_root/install/bin/mono-aot-cross" \
             --runtime-commit "$runtime_commit" --llvm-root "$llvm_root" --output "$aot_pack"
     fi
 fi
 
-"$script_dir/eng/workload/build-local-feed.py" --official-manifest "$manifest_archive" \
-    --aot-pack "$aot_pack" --output "$feed"
+if ((${#managed_workloads[@]})); then
+    feed_workload_args=()
+    for workload in "${managed_workloads[@]}"; do feed_workload_args+=(--workload "$workload"); done
+    feed_source_args=()
+    if workload_is_managed ios; then
+        feed_source_args+=(--official-manifest "$manifest_archive" --aot-pack "$aot_pack")
+    fi
+    if workload_is_managed macos; then feed_source_args+=(--official-companion-manifest "macos=$macos_manifest_archive"); fi
+    if workload_is_managed maccatalyst; then feed_source_args+=(--official-companion-manifest "maccatalyst=$maccatalyst_manifest_archive"); fi
+    if workload_is_managed tvos; then feed_source_args+=(--official-companion-manifest "tvos=$tvos_manifest_archive"); fi
+    "$script_dir/eng/workload/build-local-feed.py" \
+        "${feed_source_args[@]}" --output "$feed" "${feed_workload_args[@]}"
+fi
 if [[ "$privilege_mode" == system-helper ]]; then
-    mkdir -p "$cache_root/workload-bundles"
     workload_bundle="$cache_root/workload-bundles/$install_id.tar"
     "$bundle_builder" build --lock "$lock_path" --feed "$feed" \
         --workload-set "$workload_set_archive" --package-cache "$bundle_package_cache" \
@@ -1318,12 +1752,17 @@ offline_args=()
 [[ "$offline" == false ]] || offline_args+=(--offline)
 "$script_dir/eng/toolchain/setup-swift.sh" --destination "$toolchain/swift-$swift_version" \
     --cache "$cache_root/downloads" "${offline_args[@]}"
+"$script_dir/eng/toolchain/setup-binutils.sh" --destination "$toolchain/binutils-$binutils_version" \
+    --cache "$cache_root/downloads" --swift-root "$toolchain/swift-$swift_version" \
+    "${offline_args[@]}"
 if [[ "$offline" == true && ! -d "$cache_root/sources/xtool-$xtool_revision_short/.git" ]]; then
     printf 'xtool source is unavailable in offline mode\n' >&2
     false
 fi
 "$script_dir/eng/toolchain/setup-xtool.sh" --source-cache "$cache_root/sources/xtool-$xtool_revision_short" \
-    --swift-root "$toolchain/swift-$swift_version" --destination "$toolchain/xtool-$xtool_revision_short" \
+    --swift-root "$toolchain/swift-$swift_version" \
+    --binutils-root "$toolchain/binutils-$binutils_version" \
+    --destination "$toolchain/xtool-$xtool_revision_short" \
     --package-cache "$cache_root/swiftpm" "${offline_args[@]}"
 "$script_dir/eng/toolchain/setup-python.sh" --destination "$toolchain/python-$python_version" \
     --cache "$cache_root/downloads" "${offline_args[@]}"
@@ -1341,34 +1780,52 @@ ln -s ../toolchains/"$install_id"/rcodesign-"$rcodesign_version"/rcodesign "$dat
     --data-root "$data_root" --dotnet-root "$dotnet_root" \
     --install-id "$install_id" --project-version "$project_version" --swift-version "$swift_version"
 
-if [[ -e "$dotnet_root/metadata/workloads/$sdk_feature_band/InstalledWorkloads/ios" ]]; then
-    printf 'an ios workload already exists without this installer ownership; refusing to replace it\n' >&2
-    false
-fi
-if [[ "$privilege_mode" == system-helper ]]; then
+if [[ "$privilege_mode" == system-helper && ${#managed_workloads[@]} -gt 0 ]]; then
     install_system_helper
     system_helper_transaction_active=true
     run_system_helper install \
         --sdk-version "$sdk_version" --workload-version "$workload_set_version" \
         --workload-manifest "$workload_manifest" \
         --ownership-token "$system_transaction_id" --bundle "$workload_bundle"
-else
+elif ((${#managed_workloads[@]})); then
+    # Revalidate immediately before the durable transaction is opened. The
+    # early preflight gives operators a fast failure; this closes the lengthy
+    # acquisition/build interval before CLI mutation.
+    assert_kept_registrations_exist
+    transaction_workload_args=()
+    for workload in "${managed_workloads[@]}"; do
+        transaction_workload_args+=(
+            --workload "$workload:$(workload_manifest_id "$workload"):$(workload_manifest_identity "$workload")"
+        )
+    done
+    for workload in "${kept_workloads[@]}"; do
+        transaction_workload_args+=(
+            --protect-workload "$workload:$(workload_manifest_id "$workload"):$(workload_manifest_identity "$workload")"
+        )
+    done
     "$script_dir/eng/install/workload-transaction.py" begin --root "$dotnet_root" \
         --transaction "$workload_transaction" --package-inventory "$lock_path" \
         --sdk-feature-band "$sdk_feature_band" --workload-version "$workload_set_version" \
-        --workload-manifest "$workload_manifest" --workload-id ios \
-        --control-global-json "$control_root/global.json"
-    mkdir -p "$cache_root/workload-temp"
-    (cd "$control_root" && "$dotnet_root/dotnet" workload install ios \
+        --control-global-json "$control_root/global.json" "${transaction_workload_args[@]}"
+    (cd "$control_root" && "$dotnet_root/dotnet" workload install "${managed_workloads[@]}" \
         --configfile "$feed/NuGet.Config" --disable-parallel --temp-dir "$cache_root/workload-temp" --verbosity minimal)
-    (cd "$control_root" && "$dotnet_root/dotnet" workload list) |
-        awk -v expected="$workload_manifest" \
-            '$1 == "ios" && $2 == expected { found=1 } END { exit !found }'
+    installed_workload_list="$(cd "$control_root" && "$dotnet_root/dotnet" workload list)"
+    for workload in "${managed_workloads[@]}"; do
+        expected_manifest="$(workload_manifest_identity "$workload")"
+        awk -v workload="$workload" -v expected="$expected_manifest" \
+            '$1 == workload && $2 == expected { found=1 } END { exit !found }' <<<"$installed_workload_list"
+    done
 fi
-[[ -x "$dotnet_root/packs/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/$project_version/tools/mono-aot-cross" ]]
-"$script_dir/eng/install/verify-workload-packages.py" --root "$dotnet_root" \
-    --feed "$feed" --lock "$lock_path" \
-    --dotnet "$dotnet_root/dotnet"
+if [[ ",${managed_workloads_csv}," == *,ios,* ]]; then
+    [[ -x "$dotnet_root/packs/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/$project_version/tools/mono-aot-cross" ]]
+fi
+if ((${#managed_workloads[@]})); then
+    verify_workload_args=()
+    for workload in "${managed_workloads[@]}"; do verify_workload_args+=(--workload "$workload"); done
+    python3 "$script_dir/eng/install/verify-workload-packages.py" --root "$dotnet_root" \
+        --feed "$feed" --lock "$lock_path" --dotnet "$dotnet_root/dotnet" \
+        "${verify_workload_args[@]}"
+fi
 read_resolved_pairs install_context recommended-xcode --root "$dotnet_root" --lock "$lock_path"
 recommended_xcode_version="${install_context[recommended_xcode_version]}"
 xcode_is_compatible "$xcode_version" "$recommended_xcode_version" || {
@@ -1376,7 +1833,7 @@ xcode_is_compatible "$xcode_version" "$recommended_xcode_version" || {
         "$xcode_version" "$manifest_version" "$recommended_xcode_version" >&2
     false
 }
-if [[ "$privilege_mode" == user ]]; then
+if [[ "$privilege_mode" == user && ${#managed_workloads[@]} -gt 0 ]]; then
     "$script_dir/eng/install/workload-transaction.py" commit \
         --root "$dotnet_root" --transaction "$workload_transaction"
 fi
@@ -1386,7 +1843,7 @@ python3 - "$receipt" "$lock_sha256" "$dotnet_root" "$data_root" "$cache_root" \
     "$manifest_version" "$xcode_version" "$xcode_build" "$xcode_sdk_version" \
     "$xcode_sdk_build" "$xcode_archive_sha256" "$locked_xcode_sha256" \
     "$privilege_mode" "$system_transaction_id" "$workload_source" \
-    "$workload_manifest" "$system_helper_version" <<'PY'
+    "$workload_manifest" "$system_helper_version" "$managed_workloads_csv" "$kept_workloads_csv" <<'PY'
 import json, os, sys, tempfile
 from pathlib import Path
 receipt=Path(sys.argv[1])
@@ -1395,7 +1852,7 @@ value={
  "projectVersion":sys.argv[6],"installId":sys.argv[7],
  "toolchainLockSha256":sys.argv[2],"dotnetRoot":sys.argv[3],"dataRoot":sys.argv[4],
  "cacheRoot":sys.argv[5],"sdkVersion":sys.argv[8],"sdkSource":sys.argv[9],
- "workloadSet":sys.argv[10],"workloadId":"ios","manifestVersion":sys.argv[11],
+  "workloadSet":sys.argv[10],"workloadIds":[item for item in sys.argv[23].split(',') if item],"manifestVersion":sys.argv[11],
  "privilegeMode":sys.argv[18],
  "workloadSource":sys.argv[20],
  "workloadManifest":sys.argv[21],
@@ -1406,6 +1863,13 @@ value={
 }
 if sys.argv[19]: value["systemTransactionId"]=sys.argv[19]
 if sys.argv[22]: value["systemHelperVersion"]=sys.argv[22]
+value["managedWorkloads"]=[item for item in sys.argv[23].split(',') if item]
+value["keptWorkloads"]=[item for item in sys.argv[24].split(',') if item]
+value["supportClassification"]={
+  item:("linux-ios-runtime" if item == "ios" else "installed-unqualified")
+  for item in value["managedWorkloads"]
+}
+value["externalWorkloads"]={item:"external-unqualified" for item in value["keptWorkloads"]}
 receipt.parent.mkdir(parents=True,exist_ok=True)
 descriptor,name=tempfile.mkstemp(prefix=f".{receipt.name}.",dir=receipt.parent)
 temporary=Path(name)

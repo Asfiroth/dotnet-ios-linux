@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "schemaVersion": 1,
   "status": "active-candidate",
-  "generatedAtUtc": "2026-10-20T00:00:00Z",
+  "generatedAtUtc": "2026-10-25T22:40:23Z",
   "purpose": "M2-M9 implementation candidate. The physical-device path and the isolated SDK/workload lifecycle are verified; the root bootstrap remains pending an end-to-end run with the authentic Xcode archive.",
   "projectLicense": {
     "spdx": "MIT",
@@ -64,7 +64,11 @@
       "sha512Base64": "E67WwID69ZQmMd0fs8OFeExzyso/7rJk7QfIkK+fs+cEQj6e2s/hUA/iPtP36Li08YZVp8L7iY6Uk+zmfdU5Ww==",
       "sourceCommit": "d813e2baef17cd3a2bb5adc1e37610258d01cda3",
       "observedWorkloadId": "ios",
-      "observedPlatformAliases": ["win-x64", "win-x86", "win-arm64"],
+      "observedPlatformAliases": [
+        "win-x64",
+        "win-x86",
+        "win-arm64"
+      ],
       "source": "https://api.nuget.org/v3-flatcontainer/microsoft.net.sdk.ios.manifest-10.0.100/27.0.10722/microsoft.net.sdk.ios.manifest-10.0.100.27.0.10722.nupkg",
       "signatureReview": {
         "status": "official package NuGet author and repository signatures verified; deterministic derivative intentionally unsigned",
@@ -197,8 +201,8 @@
           "id": "DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64",
           "version": "0.1.0-preview.1",
           "origin": "local-build",
-          "sha256": "ffb98976196c515c2f3ad80f045a186c6817d54d07021e8b38bce482e46e075b",
-          "sha512Base64": "qF2UOQf2tCrL+S/Cv594MT2a1XA30wa0/sp39xAK9uIzUJsglDhd3eaTiZ7LqbvAMtKfp9/hQi9IigCmqjtvWQ==",
+          "sha256": "a0af7ad3d48e24354acc3c4fff62c1c5225a2d467db9bc175f4d983c8d860964",
+          "sha512Base64": "egrWEoLT8cwkiRFUA6EcgTXWjiwx+2fddbgr2N8A0R/As67VP0mCDf71NRt0om2oDg+8mQedY+Hya8HF+8ORDg==",
           "feedFile": "DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64.0.1.0-preview.1.nupkg",
           "installedArchive": "packs/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/0.1.0-preview.1/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64.nupkg"
         },
@@ -226,6 +230,8 @@
         "offsets": "src/mono/mono/offsets/aarch64-apple-darwin10.h",
         "patch": "eng/runtime/patches/0001-linux-host-apple-mobile-aot-cross.patch",
         "versionMetadata": "standalone build reports 10.0.12.0 and the dotnet/runtime source commit; it does not reuse the official VMR build number",
+        "reproducibleCompilerSha256": "55dcaa7bf9dd71206ff8f69a26e0eacd79af7146b2a0f7a1143c3d9e0d3267e7",
+        "reproducibilityPolicy": "The compiler build normalizes source/build/install/LLVM prefixes and is accepted only after two distinct absolute build prefixes produce reproducible compiler bytes. Historical smoke and device-evidence hashes remain observations of their original runs.",
         "nonLlvmEvidence": "compiler executes as ELF x86-64, reports arm64, compiles AotProbe.dll, and emits assembly accepted by Clang as a Mach-O arm64 relocatable object",
         "llvmEvidence": "compiler reports LLVM yes(1900), compiles all 3947 AotProbe methods, invokes the exact matched opt/llc, and emits separate Mono and LLVM Mach-O arm64 relocatable objects",
         "maciosSelectionEvidence": "the pinned macios _FindAotCompiler task selects the staged MonoAotCrossCompiler item for ios-arm64",
@@ -286,6 +292,8 @@
       },
       "deviceDeployment": {
         "status": "M7-M9 positive paths passed, including clean and incremental rebuilt-bundle installs, manual launches, deterministic probes, and cold relaunch",
+        "compilerSha256": "c85a0aad43764e9d17077f23faf6e638e79b47b315263116b2350038d977866d",
+        "compilerEvidence": "Historical physical-device evidence used the compiler hash recorded here; it predates the normalized-prefix reproducible compiler baseline and is not a claim of device validation for that later rebuild.",
         "signer": "rcodesign 0.29.0",
         "deploymentTool": "pymobiledevice3 11.26.0",
         "bundleIdentifier": "dev.dotnetioslinux.helloios",
@@ -383,254 +391,508 @@
       },
       "redistribution": "blocked-until-reviewed"
     },
-    "omarchyAppleDev": {
-      "status": "source revision inspected; isolated Swift 6.4.0, xtool, pymobiledevice3, authentic SDK import, direct development signing, USB installation, and manual runtime observation verified",
-      "repository": "https://github.com/joshuaswarren/omarchy-apple-dev.git",
-      "revision": "172e28cff7b6d5adebfa49f93957d6a864378dfb",
-      "tree": "c658002d37a28f922e1568cf9959be579d9f6cfc",
-      "license": {
-        "spdx": "MIT",
-        "sha256": "f13d4bd266e12504f3af553ee1f5617abf23106de0f3e9657596fd80a21c8fee"
-      },
-      "reviewedEntrypoints": {
-        "installToolchainSha256": "f32daeb4017d2880b9394600e2d99af57dec3834949b8eaa919caaec6c85eb99",
-        "deviceRunSha256": "f127d22a21648d5f09e776c7cd66a696e6d991dd80a3cc6808603a54dd4f045a"
-      },
-      "selection": "Full Xcode mode is selected because the no-Xcode sysroot implements only a framework subset and is insufficient evidence for the macios native-link gate.",
-      "installPolicy": "Do not execute install-toolchain.sh wholesale. Its package, home-directory, Swift-SDK, and unpinned-Python mutations must be replaced by project-owned pinned staging steps.",
-      "components": {
-        "swift": {
-          "status": "portable project-owned Linux x86-64 stage and deterministic source-built compatibility libraries verified twice",
-          "version": "6.4.0",
-          "source": "https://download.swift.org/swift-6.4.0-release/ubi10/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE-ubi10.tar.gz",
-          "sha256": "50863678e3bafd91fcbc94c0bb76610bab37c1ee01e335fc7d8616904e03e19a",
-          "license": "Apache-2.0 with Runtime Library Exception",
-          "hostCompatibility": {
-            "strategy": "Build ncurses and libxml2 from hash-verified upstream source with bundled Swift Clang 21, stage them only in private Swift runtime directories, and do not patch ELF files or use distro packages.",
-            "ncurses": {
-              "version": "6.6",
-              "source": "https://ftp.gnu.org/gnu/ncurses/ncurses-6.6.tar.gz",
-              "sha256": "355b4cbbed880b0381a04c46617b7656e362585d52e9cf84a67e2009b749ff11",
-              "license": "X11-like"
-            },
-            "libxml2": {
-              "version": "2.13.9",
-              "source": "https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.9.tar.xz",
-              "sha256": "a2c9ae7b770da34860050c309f903221c67830c86e4a7e760692b803df95143a",
-              "license": "MIT"
-            },
-            "localEvidence": "Swift and swiftc report 6.4, bundled Clang reports 21.0.0, and a release SwiftPM executable builds and runs with no LD_LIBRARY_PATH."
+    "hostToolchain": {
+      "swift": {
+        "status": "portable project-owned Linux x86-64 stage and deterministic source-built compatibility libraries verified twice",
+        "version": "6.4.0",
+        "source": "https://download.swift.org/swift-6.4.0-release/ubi10/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE-ubi10.tar.gz",
+        "sha256": "50863678e3bafd91fcbc94c0bb76610bab37c1ee01e335fc7d8616904e03e19a",
+        "license": "Apache-2.0 with Runtime Library Exception",
+        "hostCompatibility": {
+          "strategy": "Build ncurses and libxml2 from hash-verified upstream source with bundled Swift Clang 21, stage them only in private Swift runtime directories, and do not patch ELF files or use distro packages.",
+          "ncurses": {
+            "version": "6.6",
+            "source": "https://ftp.gnu.org/gnu/ncurses/ncurses-6.6.tar.gz",
+            "sha256": "355b4cbbed880b0381a04c46617b7656e362585d52e9cf84a67e2009b749ff11",
+            "license": "X11-like"
           },
-          "stagedOutputs": {
-            "swiftSha256": "eb654eb03c86e363f3ff7a251f34aa0740efd49fcf260cd4c43041d20a60b52b",
-            "swiftFrontendSha256": "eb09157a34c8c030abff718d06b0a4b721b70dc4da910bbaaa4c2c0b5299d446",
-            "clangSha256": "3753e74f2ae853e3455fcf81877a0e1fd8906cd557e74aecf2b63108d3c097c3",
-            "privateNcursesSha256": "c4cd27191189c942084a8973467baa5b83ab8067d951c4b7281ae56f61b82fe0",
-            "privatePanelSha256": "7d35183a1ee354e5c0307208129882ba8b18fce3f8348ee50c9fe62067e83387",
-            "privateFormSha256": "82fb1a593b08d9801b850a6341cd6dc3c6205a0919f6099012ff4970d5a15c09",
-            "privateLibxml2Sha256": "3a23f2967325395145b43da7b1901eeadb15060f36179ae441ecd419756961b0"
+          "libxml2": {
+            "version": "2.13.9",
+            "source": "https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.9.tar.xz",
+            "sha256": "a2c9ae7b770da34860050c309f903221c67830c86e4a7e760692b803df95143a",
+            "license": "MIT"
+          },
+          "localEvidence": "Swift and swiftc report 6.4, bundled Clang reports 21.0.0, and a release SwiftPM executable builds and runs with no LD_LIBRARY_PATH."
+        },
+        "stagedOutputs": {
+          "swiftSha256": "eb654eb03c86e363f3ff7a251f34aa0740efd49fcf260cd4c43041d20a60b52b",
+          "swiftFrontendSha256": "eb09157a34c8c030abff718d06b0a4b721b70dc4da910bbaaa4c2c0b5299d446",
+          "clangSha256": "3753e74f2ae853e3455fcf81877a0e1fd8906cd557e74aecf2b63108d3c097c3",
+          "privateNcursesSha256": "c4cd27191189c942084a8973467baa5b83ab8067d951c4b7281ae56f61b82fe0",
+          "privatePanelSha256": "7d35183a1ee354e5c0307208129882ba8b18fce3f8348ee50c9fe62067e83387",
+          "privateFormSha256": "82fb1a593b08d9801b850a6341cd6dc3c6205a0919f6099012ff4970d5a15c09",
+          "privateLibxml2Sha256": "3a23f2967325395145b43da7b1901eeadb15060f36179ae441ecd419756961b0"
+        }
+      },
+      "binutils": {
+        "status": "source archive and reproducible project-owned Linux x86-64 stage verified twice",
+        "version": "2.47",
+        "source": "https://ftp.gnu.org/gnu/binutils/binutils-2.47.tar.bz2",
+        "sha256": "3068128c75cda9f898ccb4211d360246e8e195ffcc9dfb655b23ae23a54800e8",
+        "sourceDateEpoch": 1785024000,
+        "license": "GPL-3.0-or-later",
+        "licenseSha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+        "build": {
+          "compiler": "Swift 6.4.0 bundled Clang 21.0.0",
+          "clangSha256": "3753e74f2ae853e3455fcf81877a0e1fd8906cd557e74aecf2b63108d3c097c3",
+          "lldSha256": "ba3e98cb088a0a16b40f12cf66d7e63be1e5f94fd62687504f6a814f9de1941e",
+          "llvmArSha256": "9ed85673eba8650d91c7eac4b251cdfc99c29b8318634a3da8d94361b8617abc",
+          "llvmNmSha256": "d90b641f9efbb71a7b23a6a52d944289f5da9b4ca7f11de2c0f86780a43ada65",
+          "llvmObjcopySha256": "02901f6141b43b490e5b67ae9cc8f0414025897e1051333e1c32ca0a5fb4b0b3",
+          "llvmObjdumpSha256": "f8ce2e273275327efde83ec2795b5c9aa1a73e11c3f24cec60d898b39148c71f",
+          "normalization": "Build/source prefixes map to /usr/src/dotnet-ios-linux/binutils-2.47, build IDs are disabled, and SOURCE_DATE_EPOCH is fixed. Two builds from distinct source, build, destination, and Swift prefixes produced identical staged tools."
+        },
+        "stagedOutputs": {
+          "objcopySha256": "33959aff8231f8e050b3603eeddf75bf66e54a41f8cdb382371c202d5be370e0",
+          "stripSha256": "705d6ecb90640da4844a9f2b847f077c8d721f1b613adc2f52b3c8daa243d49e",
+          "readelfSha256": "9e61a3bb5cbf44dd92504562e751f737e636464d5425c28967323ef7b6545234"
+        },
+        "classification": "build-only"
+      },
+      "xtool": {
+        "status": "hermetic logical-path and pinned-normalizer build verified twice in project-owned Linux x86-64 stages",
+        "repository": "https://github.com/joshuaswarren/xtool.git",
+        "baseVersion": "1.20.1",
+        "baseTagCommit": "916cdffba86c7661e450a98eb76bfad5f824a4d6",
+        "revision": "f0a1f90efdbb0dc023e276ff529da92618da7a87",
+        "tree": "b9ad5b46fcd0c89951413bee95fa94078accf10f",
+        "upstreamPackageResolvedSha256": "43e1c442dbb52cb3117837c2da4f115266d5f2f2834fee8bffa3112519c85d7c",
+        "completePackageResolvedLock": "eng/toolchain/xtool-Package.resolved.lock",
+        "completePackageResolvedSha256": "978f904cce959c45792fa57baafb4f6f8cbbdda95fbb2d3feb9e25c43b29e89e",
+        "resolvedSwiftPackages": 55,
+        "resolutionCorrection": "Swift 6.4 resolves OpenCombine 0.14.0 transitively; it is absent from the upstream 54-pin file and is included in the enforced project lock.",
+        "xadi": {
+          "revision": "2aad968e4806b8571f6f2bed22ecec00b0322f95",
+          "artifactSha256": "2fc1aeb058f6067d23e2f2217a2ea0ec843057e1d82c13db37e30b8219d8d469"
+        },
+        "stagedOutputs": {
+          "xtoolSha256": "c13e2270e6e9d9cce21ba7daae1b51016fcbd50c1bfd2c6747b1ebd208cb168d",
+          "libXADISha256": "eb68bd3dad62f68eac166aad7dc4e8c931013f42a529a8f5d4c520e671375350",
+          "logicalScratch": "/tmp/dotnet-ios-linux/.xtool-build-f0a1f90efdbb0dc023e276ff529da92618da7a87",
+          "normalization": "A rootless user/mount namespace overlays the installer-created neutral /tmp/dotnet-ios-linux mountpoint with private tmpfs, then exposes each distinct physical scratch tree at one fixed logical child path before Swift compilation. No OpenCode path or pre-existing host child directory is required. Hash-locked GNU Binutils 2.47 removes the varying build-ID note, zeroes .swift_modhash, and strips unneeded symbols. Two clean offline builds from distinct physical build and Swift prefixes produced byte-identical final xtool and XADI files.",
+          "localEvidence": "Final ELF metadata and complete bytes matched, neither physical build/Swift prefix nor the superseded OpenCode path was present, and the staged executable reported the exact revision. Runtime and dynamic-loader checks ran only after candidate agreement and passed with LD_LIBRARY_PATH unset. The earlier staged LLVM normalizer was rejected because it changed XADI and retained cross-prefix xtool differences."
+        },
+        "reproducibilityIncident": {
+          "previousXtoolSha256": "91be27f15a5318b13487a89294e6f69cf7846cd9494d7c323d85ab44c6fab452",
+          "previousHermeticXtoolSha256": "6057279c2ae646ef4cb2fe162ee385d1fe3c62e9db85e04460826969d0ae9c21",
+          "installerObservedXtoolSha256": "f17ca7b801656081480c36e05b5cab1dad3cd30f340eefb9c0b16d8bb3cc807f",
+          "ambientGnuDiagnosticXtoolSha256": "fa8a6dd9625414b8876166dc43971d7f4eda268a50d76be041086a38e85057f7",
+          "rejectedLlvmXtoolSha256": [
+            "4b4459bb6f590cd3c7753d60b7db0fc42f570ecee49318848b9209996f9d9e4d",
+            "2b506aef6498c1df01a027e53c2dee67500c168473ed886b4e77539fb6d4ce7e"
+          ],
+          "rejectedLlvmLibXADISha256": "60802558031abcce7162d3bf8a71a22a09d2f034f221ea388f43a7fecbea6e0b",
+          "cause": "Swift #file literals retained distinct physical SwiftPM scratch paths in 59 .rodata bytes; debug/file prefix maps do not rewrite those runtime strings.",
+          "disposition": "The original historical hash was replaced only after two clean fixed-logical-path offline builds produced identical complete files. The first hermetic output was subsequently superseded after its OpenCode-specific logical parent was identified as non-portable; two more clean offline builds qualified the neutral namespace-private path. The full hash gate remained enabled throughout."
+        },
+        "license": "MIT",
+        "licenseSha256": "04cf87035e25606762ba596ec29ecac450a281f3d210a8042c91f49645c2e695",
+        "transitiveLicenseAudit": {
+          "status": "complete for private build-only use; binary redistribution blocked pending release-specific LGPL and notice compliance",
+          "reviewedPins": 55,
+          "licenseFamilies": {
+            "Apache-2.0": 32,
+            "MIT": 19,
+            "BSD-2-Clause": 2,
+            "LGPL-3.0-only": 1,
+            "LGPL-2.1-only": 1
+          },
+          "noticeFiles": 18,
+          "durableInventorySha256": "5d90a5c5dc3983b5ccb5d24ee0256b4406304db5a3a37246efecbc6ef66bc59f",
+          "durableInventoryPath": "share/licenses/xtool/SHA256SUMS",
+          "copyleftDependencies": [
+            "unxip: LGPL-3.0-only",
+            "xadi: LGPL-2.1-only"
+          ],
+          "classification": "build-only",
+          "redistribution": "blocked until a release carries all notices and satisfies LGPL source/relinking requirements"
+        }
+      },
+      "rcodesign": {
+        "version": "0.29.0",
+        "source": "https://github.com/indygreg/apple-platform-rs/releases/tag/apple-codesign%2F0.29.0",
+        "releaseCommit": "2312b1e5bd77322c019613e0ca624e222c6c6e08",
+        "linuxX64TarSha256": "dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002",
+        "linuxX64ExecutableSha256": "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2",
+        "copyingSha256": "856867e127c2349ea11dff0930a488e7a1e386d975bcb9088a3c6e2bf1b3d990",
+        "cargoLockSha256": "ee4a17538d0500374329dd111f31aff5837a75dfc1e7b1fb1b429d3466b49799",
+        "licenseAudit": "335-component release inventory reviewed; scanner gap for ring 0.17.8 resolved against crates.io checksum c17fa4cb658e3583423e915b9f3acc01cceaee1860e33d59ebae66adc3a2dc0d and its ISC/BoringSSL-derived notice",
+        "classification": "build-only; retain COPYING; no redistribution claim",
+        "localEvidence": "Transactional project-owned setup verifies the archive layout, all staged hashes, static-pie x86-64 ELF format, exact version output, reuse, and fail-closed corrupt-cache/unowned-destination behavior.",
+        "signingWorkflowEvidence": "A disposable self-signed fixture verifies P12 compatibility and wildcard entitlement concretization. A private Apple development identity/profile then passed key/certificate, expiry, team, bundle, certificate-membership, and device-authorization checks; the copy-only inside-out signature has CodeResources and LC_CODE_SIGNATURE and passed rcodesign's documented partial executable verifier."
+      },
+      "portablePython": {
+        "version": "3.14.8",
+        "build": "20261013",
+        "source": "https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.14.8%2B20261013-x86_64-unknown-linux-gnu-install_only.tar.gz",
+        "sha256": "322271a761140ffb3f522431048f701831e412c8f64770103d2b881ee2bbaed0",
+        "executableSha256": "1fd534136499c05c3031d9453d279b257e225072341c68a1d0c4b30b96dc5d17",
+        "licenseRetention": {
+          "classification": "build-only",
+          "cpythonLicenseSha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231",
+          "builderLicense": {
+            "source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20261013/LICENSE",
+            "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+          },
+          "bundledDependencyLicenses": {
+            "source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20261013/python-licenses.rst",
+            "sha256": "e43fb936c6655d7996dba480d7ebdea492d6040ec388eb8ed9d1000f72de8cab"
+          },
+          "redistribution": "blocked pending a release-specific source and notice compliance bundle"
+        },
+        "uv": {
+          "version": "0.9.10",
+          "source": "https://github.com/astral-sh/uv/releases/download/0.9.10/uv-x86_64-unknown-linux-gnu.tar.gz",
+          "sha256": "440c4215b171e64061d65d16a23753dd25c29a7f7b1b0446c9e9aed0fa372f27",
+          "executableSha256": "040491bf5feb28ce7409dfc2f9aa1532aeb569aba70f61bd4d3ddb2386d13350",
+          "license": "Apache-2.0 OR MIT",
+          "licenseApache": {
+            "source": "https://raw.githubusercontent.com/astral-sh/uv/0.9.10/LICENSE-APACHE",
+            "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+          },
+          "licenseMit": {
+            "source": "https://raw.githubusercontent.com/astral-sh/uv/0.9.10/LICENSE-MIT",
+            "sha256": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c"
           }
         },
-        "xtool": {
-          "status": "verified in a project-owned Linux x86-64 stage",
-          "repository": "https://github.com/joshuaswarren/xtool.git",
-          "baseVersion": "1.20.1",
-          "baseTagCommit": "916cdffba86c7661e450a98eb76bfad5f824a4d6",
-          "revision": "f0a1f90efdbb0dc023e276ff529da92618da7a87",
-          "tree": "b9ad5b46fcd0c89951413bee95fa94078accf10f",
-          "upstreamPackageResolvedSha256": "43e1c442dbb52cb3117837c2da4f115266d5f2f2834fee8bffa3112519c85d7c",
-          "completePackageResolvedLock": "eng/toolchain/xtool-Package.resolved.lock",
-          "completePackageResolvedSha256": "978f904cce959c45792fa57baafb4f6f8cbbdda95fbb2d3feb9e25c43b29e89e",
-          "resolvedSwiftPackages": 55,
-          "resolutionCorrection": "Swift 6.4 resolves OpenCombine 0.14.0 transitively; it is absent from the upstream 54-pin file and is included in the enforced project lock.",
-          "xadi": {
-            "revision": "2aad968e4806b8571f6f2bed22ecec00b0322f95",
-            "artifactSha256": "2fc1aeb058f6067d23e2f2217a2ea0ec843057e1d82c13db37e30b8219d8d469"
+        "localEvidence": "Transactional install and offline reuse passed on glibc Linux x86-64; archive, executable, and durable license hashes are rechecked."
+      },
+      "pymobiledevice3": {
+        "version": "11.26.0",
+        "source": "https://pypi.org/project/pymobiledevice3/11.26.0/",
+        "wheelSha256": "b1ed7fb66211b586618608980201b23ea40d8d02ead77764a0b97a9307341d21",
+        "sdistSha256": "6d41f75472becf84f23661d4d9e15561ec45bbfc3906faa100f0a48ee43feb08",
+        "license": "GPL-3.0-or-later",
+        "requirementsLock": "eng/toolchain/pymobiledevice3-requirements.lock",
+        "requirementsLockSha256": "b76b9db5d691b7ae6d6e377884e7ff070f2545b5749d724fb24dc7d60f3d90d5",
+        "resolvedPythonPackages": 101,
+        "localEvidence": "A hash-enforced isolated portable Python 3.14.8 installation imports pymobiledevice3 and cryptography, reports pymobiledevice3 11.26.0, passes offline reuse, discovers one USB device, and validates one existing lockdown pairing through the redacted probe.",
+        "transitiveLicenseAudit": {
+          "status": "all 101 exact installed distributions reviewed from wheel metadata and embedded notices; private build-only use accepted",
+          "reviewedDistributions": 101,
+          "copyleftExamples": [
+            "pymobiledevice3 and developer-disk-image: GPL-3.0-or-later",
+            "pmd-net-addr, pmd-net-proto, and pmd-pytcp: GPL-3.0-or-later",
+            "pylzss: LGPLv3",
+            "firmware/parser helpers include GPL-3.0-or-later components"
+          ],
+          "metadataConflicts": [
+            "pytun-pmd3",
+            "remotezip2"
+          ],
+          "classification": "build-only",
+          "redistribution": "blocked until a release-specific notice/source bundle resolves copyleft obligations and metadata conflicts"
+        }
+      }
+    },
+    "appleCompanionWorkloads": {
+      "status": "registration-only package graph hash-verified; Linux build, AOT, signing, deployment, runtime, Rider, Uno, and MAUI support are unqualified",
+      "workloadIds": [
+        "macos",
+        "maccatalyst",
+        "tvos"
+      ],
+      "workloads": [
+        {
+          "workloadId": "macos",
+          "supportClassification": "installed-unqualified",
+          "manifest": {
+            "id": "Microsoft.NET.Sdk.macOS.Manifest-10.0.100",
+            "version": "27.0.10722",
+            "origin": "unsigned-local-derivative",
+            "officialSha256": "ea27fe28670daea717b2af18d377da3ca522580a913536ec9a7372dfb7da8cad",
+            "officialSha512Base64": "8WkzZbAVFxEpmyy1ZN4Rphgiz1ztwj5PgjyCtQ3v3Cw3b7a+kdOMPXrW7t4Etg+sNHsJ0JnNJz7vvlErRpfOIw==",
+            "feedFile": "Microsoft.NET.Sdk.macOS.Manifest-10.0.100.27.0.10722.nupkg",
+            "sha256": "534120274168f277c9737e9ac8d299f14f91fecf8b002a155748ae1ef3d31594",
+            "sha512Base64": "OMb5m5f2PVG6HSzK9pNTFLtboGFWgJxM1YyatgZB2xRGnpbQ18LAN8S/LyL5OJs1KS5+XUVMunRznguLeGm6MA=="
           },
-          "stagedOutputs": {
-            "xtoolSha256": "91be27f15a5318b13487a89294e6f69cf7846cd9494d7c323d85ab44c6fab452",
-            "libXADISha256": "eb68bd3dad62f68eac166aad7dc4e8c931013f42a529a8f5d4c520e671375350",
-            "normalization": "The varying GNU build-ID note is removed and the non-runtime .swift_modhash section is zeroed after confirming it is the only remaining cross-prefix difference. Two fresh offline builds from different deterministic Swift prefixes produced the recorded byte-identical hash.",
-            "localEvidence": "The staged executable reports the exact revision, resolves its private Swift runtime through $ORIGIN, executes --help with LD_LIBRARY_PATH unset, and passes offline reuse with output hashes rechecked."
-          },
-          "license": "MIT",
-          "licenseSha256": "04cf87035e25606762ba596ec29ecac450a281f3d210a8042c91f49645c2e695",
-          "transitiveLicenseAudit": {
-            "status": "complete for private build-only use; binary redistribution blocked pending release-specific LGPL and notice compliance",
-            "reviewedPins": 55,
-            "licenseFamilies": {
-              "Apache-2.0": 32,
-              "MIT": 19,
-              "BSD-2-Clause": 2,
-              "LGPL-3.0-only": 1,
-              "LGPL-2.1-only": 1
-            },
-            "noticeFiles": 18,
-            "durableInventorySha256": "5d90a5c5dc3983b5ccb5d24ee0256b4406304db5a3a37246efecbc6ef66bc59f",
-            "durableInventoryPath": "share/licenses/xtool/SHA256SUMS",
-            "copyleftDependencies": ["unxip: LGPL-3.0-only", "xadi: LGPL-2.1-only"],
-            "classification": "build-only",
-            "redistribution": "blocked until a release carries all notices and satisfies LGPL source/relinking requirements"
-          }
-        },
-        "openAppleMacros": {
-          "repository": "https://github.com/joshuaswarren/OpenAppleMacros.git",
-          "revision": "cb003a1763b08947dd37376ed8240cbfb4745c32",
-          "tree": "771f94e97d8098ec53d5ac08b978de3e7a76b863",
-          "packageResolvedSha256": "6e96c4ff18b70af6b4f7d5da4f732a0f336e05aeb203e39fc03aa0d940d5b380",
-          "license": "MIT; vendored FoundationMacros are Apache-2.0 with Runtime Library Exception",
-          "licenseSha256": "0cb44d89d3783a912b865a7fd38adaf581d32767d1416c912479dbe2d1c3f1a7"
-        },
-        "darwinTools": {
-          "packageResolvedSha256": "0f674b23de1e50959ce336402c87785036abd98a00467aa6a2ce5094c6d7cf0c",
-          "dependencies": [
+          "packages": [
             {
-              "repository": "https://github.com/joshuaswarren/AssetKit.git",
-              "revision": "09875ccce71e15244aa4910546e1f6afb6ef71d9",
-              "tree": "dd615b0123d05eaae43549005631385d71faecf2",
-              "license": "MIT; vendored CLZFSE is BSD-3-Clause"
+              "id": "Microsoft.macOS.Ref.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "1a307ec95b1edb28b99289b87b68fff81050e84b54c37524560c7be250240614",
+              "sha512Base64": "07QBBHGFLOkk7LV7VDPnwFmm2WvMKi35nUD8Nw/vccoETzqWGEER9QyC7OZluesRJV6+nYk1BhxdBHBPKJtVxQ==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.macOS.Ref.net10.0_27.0/27.0.10722/Microsoft.macOS.Ref.net10.0_27.0.nupkg",
+              "key": "macos-macos-ref-net10-0_27-0"
             },
             {
-              "repository": "https://github.com/rarestype/h.git",
-              "revision": "aa3626829160917d4378330617971977cbd78f5b",
-              "tree": "a85d450d88999c89ec0dc9b3cae7a9cabf37b70b",
-              "license": "Apache-2.0"
+              "id": "Microsoft.macOS.Runtime.osx-arm64.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "3cb236c6d6626039bad000ffd9622681d93d52cb6a8f87d05ee26248770a1086",
+              "sha512Base64": "SQFUwA595cUaqw6wvVCgoGjMgzTlxlee6y5mXaeTG3ELG/9vS4WD/JdRf20cxSfBJ7l2jsV6Ke0xLm/blgh5bg==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.macOS.Runtime.osx-arm64.net10.0_27.0/27.0.10722/Microsoft.macOS.Runtime.osx-arm64.net10.0_27.0.nupkg",
+              "key": "macos-macos-runtime-osx-arm64-net10-0_27-0"
             },
             {
-              "repository": "https://github.com/tayloraswift/swift-png.git",
-              "revision": "8a0bcd4df5e4b307c804937776a56dd6ecdf6396",
-              "tree": "e2757b143b351b0f68cf66791493181221b6608a",
-              "license": "Apache-2.0"
+              "id": "Microsoft.macOS.Runtime.osx-x64.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "1f00a183ce9d839091cb4445a2c680408d5c5cc1fff793fca8bcf2bbb951fbd3",
+              "sha512Base64": "XrM23X1iJKPNVTlKlGgeOuF66lhsCOwQV/i+sEEFfhgxqKcopTNOafXlrU+MX2kQ/qRAi0sN/gv4kQ8zDOx9/A==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.macOS.Runtime.osx-x64.net10.0_27.0/27.0.10722/Microsoft.macOS.Runtime.osx-x64.net10.0_27.0.nupkg",
+              "key": "macos-macos-runtime-osx-x64-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.macOS.Runtime.osx.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "31cd354e0a755178e8000a5feb19d94c15a77015137dbdc368b52239209a134f",
+              "sha512Base64": "5Jf3hYMtRNShSOxIYjwn+5I67AOLb/rQBwteFZ2GDuBDpz81auDESFMJIE1EXNkeq6cuZmwDbzX35MkGHBSmiw==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.macOS.Runtime.osx.net10.0_27.0/27.0.10722/Microsoft.macOS.Runtime.osx.net10.0_27.0.nupkg",
+              "key": "macos-macos-runtime-osx-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.macOS.Sdk.net10.0_26.0",
+              "version": "26.0.11017",
+              "sha256": "ebe91027bb0779c577ee0ec86e5641556dc6ddd354b2e89f6f15acedfa90faa4",
+              "sha512Base64": "TwCKnhfYdU1BEMQeXpYZISC7jFHH8C/XGdZqjVKbVFFRnTRahOQzGGaB0lDtalXlD5Wk407O4SmReeYIsoGyxg==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.macOS.Sdk.net10.0_26.0/26.0.11017/Microsoft.macOS.Sdk.net10.0_26.0.nupkg",
+              "key": "macos-macos-sdk-net10-0_26-0"
+            },
+            {
+              "id": "Microsoft.macOS.Sdk.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "cf07237a5466ac4e9e2993c0d133c3334aca79d50f4e54c02336265b2ac13515",
+              "sha512Base64": "MuKuV3bj+PSW9qkS4Qws08owxG0tAGAwNAm7JZaWzQ91ee/0xPSzpUOXI0oUM89VVi7Ft8Xofa2Q1ZU+CG38FQ==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.macOS.Sdk.net10.0_27.0/27.0.10722/Microsoft.macOS.Sdk.net10.0_27.0.nupkg",
+              "key": "macos-macos-sdk-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.macOS.Sdk.net9.0_15.0",
+              "version": "15.0.9617",
+              "sha256": "70fc8a5137ce812c6b304fc72bc7050478bf2dde1cb31fbe0df5e3184aa14f73",
+              "sha512Base64": "kf2AASE+tgLRz1Usu7+b4bO6bZ3bWweZ6XlhKJ5muSRr1czDHUFyq9mSzAgHQcQ0c/Pg/bDUkp/QJKJiRYQ2+Q==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.macOS.Sdk.net9.0_15.0/15.0.9617/Microsoft.macOS.Sdk.net9.0_15.0.nupkg",
+              "key": "macos-macos-sdk-net9-0_15-0"
+            },
+            {
+              "id": "Microsoft.macOS.Sdk.net9.0_26.5",
+              "version": "26.5.9004",
+              "sha256": "0696cefcb51160c5cc4a5467224b2e20601f9bae5a85bfe614a2110d90a1e207",
+              "sha512Base64": "LC6kjyPLqTzslaOqHtjcaHESRwzy0vHRM+lZRbh82v4VivluNEszbRKi3RLzst03tMrlj9HQI61SOBVhkGxXkQ==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.macOS.Sdk.net9.0_26.5/26.5.9004/Microsoft.macOS.Sdk.net9.0_26.5.nupkg",
+              "key": "macos-macos-sdk-net9-0_26-5"
+            },
+            {
+              "id": "Microsoft.macOS.Templates",
+              "version": "27.0.10722",
+              "sha256": "b10433219d32a18dd963503f185e2cecefdabca7373b26633e31a0a9ac08bb4f",
+              "sha512Base64": "dLs4Ogpa0cDBiiT0xs58nkmfc+79W3VJQZ/oDdXhg/GUNmV6bIKmbedx1nqdwIFlkxGMHZzCvt+ZmXMpRgY1yQ==",
+              "origin": "nuget.org",
+              "installedArchive": "template-packs/microsoft.macos.templates.27.0.10722.nupkg",
+              "key": "macos-macos-templates"
             }
           ]
         },
-        "rcodesign": {
-          "version": "0.29.0",
-          "source": "https://github.com/indygreg/apple-platform-rs/releases/tag/apple-codesign%2F0.29.0",
-          "releaseCommit": "2312b1e5bd77322c019613e0ca624e222c6c6e08",
-          "linuxX64TarSha256": "dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002",
-          "linuxX64ExecutableSha256": "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2",
-          "copyingSha256": "856867e127c2349ea11dff0930a488e7a1e386d975bcb9088a3c6e2bf1b3d990",
-          "cargoLockSha256": "ee4a17538d0500374329dd111f31aff5837a75dfc1e7b1fb1b429d3466b49799",
-          "licenseAudit": "335-component release inventory reviewed; scanner gap for ring 0.17.8 resolved against crates.io checksum c17fa4cb658e3583423e915b9f3acc01cceaee1860e33d59ebae66adc3a2dc0d and its ISC/BoringSSL-derived notice",
-          "classification": "build-only; retain COPYING; no redistribution claim",
-          "localEvidence": "Transactional project-owned setup verifies the archive layout, all staged hashes, static-pie x86-64 ELF format, exact version output, reuse, and fail-closed corrupt-cache/unowned-destination behavior.",
-          "signingWorkflowEvidence": "A disposable self-signed fixture verifies P12 compatibility and wildcard entitlement concretization. A private Apple development identity/profile then passed key/certificate, expiry, team, bundle, certificate-membership, and device-authorization checks; the copy-only inside-out signature has CodeResources and LC_CODE_SIGNATURE and passed rcodesign's documented partial executable verifier."
-        },
-        "ipsw": {
-          "version": "3.1.731",
-          "source": "https://github.com/blacktop/ipsw/releases/tag/v3.1.731",
-          "linuxX64TarSha256": "98e5b127641be3511242a5ba9c5872ef34010e5171318b616e5aa80a607749ff",
-          "scope": "LLDB/device-symbol support; not acquired or installed by the root bootstrap",
-          "licenseAudit": "out of the installed graph; must be completed before ipsw is added to bootstrap or release inputs"
-        },
-        "portablePython": {
-          "version": "3.14.8",
-          "build": "20261013",
-          "source": "https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.14.8%2B20261013-x86_64-unknown-linux-gnu-install_only.tar.gz",
-          "sha256": "322271a761140ffb3f522431048f701831e412c8f64770103d2b881ee2bbaed0",
-          "executableSha256": "1fd534136499c05c3031d9453d279b257e225072341c68a1d0c4b30b96dc5d17",
-          "licenseRetention": {
-            "classification": "build-only",
-            "cpythonLicenseSha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231",
-            "builderLicense": {
-              "source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20261013/LICENSE",
-              "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
-            },
-            "bundledDependencyLicenses": {
-              "source": "https://raw.githubusercontent.com/astral-sh/python-build-standalone/20261013/python-licenses.rst",
-              "sha256": "e43fb936c6655d7996dba480d7ebdea492d6040ec388eb8ed9d1000f72de8cab"
-            },
-            "redistribution": "blocked pending a release-specific source and notice compliance bundle"
+        {
+          "workloadId": "maccatalyst",
+          "supportClassification": "installed-unqualified",
+          "manifest": {
+            "id": "Microsoft.NET.Sdk.MacCatalyst.Manifest-10.0.100",
+            "version": "27.0.10722",
+            "origin": "unsigned-local-derivative",
+            "officialSha256": "17af6eab79ad2902241a1b782395a5f1f897391663725c34c3984d826bff62f3",
+            "officialSha512Base64": "sjKXMijKU7PPIPUPfwf6+F3q1sxv5/gIVC6uc/sv/EnUnmTVWsUbHFxLNFVuIogbMH2sXUO1IHkwbont7AC+0A==",
+            "feedFile": "Microsoft.NET.Sdk.MacCatalyst.Manifest-10.0.100.27.0.10722.nupkg",
+            "sha256": "39cb2dcf04d90882b2006b0766d5270dcfc5c9819e888b869d4358a139048aa2",
+            "sha512Base64": "ODa33AfFyDgNQjPSmF/lM+7DPjr3cXFMDs0NwTKYLhpT+LDTDbMgIYURS1qSrCgSOKVEJckHpIe0qg0/bGWgMw=="
           },
-          "uv": {
-            "version": "0.9.10",
-            "source": "https://github.com/astral-sh/uv/releases/download/0.9.10/uv-x86_64-unknown-linux-gnu.tar.gz",
-            "sha256": "440c4215b171e64061d65d16a23753dd25c29a7f7b1b0446c9e9aed0fa372f27",
-            "executableSha256": "040491bf5feb28ce7409dfc2f9aa1532aeb569aba70f61bd4d3ddb2386d13350",
-            "license": "Apache-2.0 OR MIT",
-            "licenseApache": {
-              "source": "https://raw.githubusercontent.com/astral-sh/uv/0.9.10/LICENSE-APACHE",
-              "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+          "packages": [
+            {
+              "id": "Microsoft.MacCatalyst.Ref.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "d1f13f451ba72e245d8302c465d9b9e3a2270c9d698747ce422837c1320cd199",
+              "sha512Base64": "bCBIVE93XqyHYa49d5h3tONQ/T9h3Mkjms7tKnctp8Ed0PeddEtvsIA8PeTX/mcwRorrFbJ82jVVUORDDz+fTg==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.MacCatalyst.Ref.net10.0_27.0/27.0.10722/Microsoft.MacCatalyst.Ref.net10.0_27.0.nupkg",
+              "key": "maccatalyst-maccatalyst-ref-net10-0_27-0"
             },
-            "licenseMit": {
-              "source": "https://raw.githubusercontent.com/astral-sh/uv/0.9.10/LICENSE-MIT",
-              "sha256": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c"
+            {
+              "id": "Microsoft.MacCatalyst.Runtime.maccatalyst-arm64.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "08c63f3cc05981a73f394a858b7d07a356a1cfabcfe1a0941145f078ea54c3f1",
+              "sha512Base64": "2+2TEr0MrQCfQWLjqIsJrlVozzu75Gva6KH1jr5CySJ4UGyK3CZuvNBXS3w9h0ba4mPdk48tRAKL/VhCr4bFFg==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.MacCatalyst.Runtime.maccatalyst-arm64.net10.0_27.0/27.0.10722/Microsoft.MacCatalyst.Runtime.maccatalyst-arm64.net10.0_27.0.nupkg",
+              "key": "maccatalyst-maccatalyst-runtime-maccatalyst-arm64-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.MacCatalyst.Runtime.maccatalyst-x64.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "ebe093b7bfbabad56a32a59dd9d3c1267a77edea9f93db12cd2c0846663180c7",
+              "sha512Base64": "qO+f4XHa2Zo/Huo2UFJkzr/pnPJanAplHNa25JCjIatwus7RHoUwbqIEm3uac8JxbKlm2Q/jMbur1IBPV6EZQQ==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.MacCatalyst.Runtime.maccatalyst-x64.net10.0_27.0/27.0.10722/Microsoft.MacCatalyst.Runtime.maccatalyst-x64.net10.0_27.0.nupkg",
+              "key": "maccatalyst-maccatalyst-runtime-maccatalyst-x64-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.MacCatalyst.Runtime.maccatalyst.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "9824a116f01fd40d73c7eedb260a393d6654a6863fcff5e9a163dcfbd20e6477",
+              "sha512Base64": "KnlGLKxUn/RsVHC2uh13TGl+iIomALed/8pwkw2gPA3ntqMyCvgUCK2SEF3hYz1dO77379OKlHKoxbsEtlxwBw==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.MacCatalyst.Runtime.maccatalyst.net10.0_27.0/27.0.10722/Microsoft.MacCatalyst.Runtime.maccatalyst.net10.0_27.0.nupkg",
+              "key": "maccatalyst-maccatalyst-runtime-maccatalyst-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.MacCatalyst.Sdk.net10.0_26.0",
+              "version": "26.0.11017",
+              "sha256": "ede8ba1f127ca52973ae3f8b9b5bcf26cc1cac5e5163033433e4b156d0dce776",
+              "sha512Base64": "pPxmmQuw5VP3OQTyNBhaFtz0RxdJctpPPNQWYriBjlC3Kj89RIS1wvnqlsxn2EZ/9Mxmwjxam93Gm1kEz2+l1Q==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.MacCatalyst.Sdk.net10.0_26.0/26.0.11017/Microsoft.MacCatalyst.Sdk.net10.0_26.0.nupkg",
+              "key": "maccatalyst-maccatalyst-sdk-net10-0_26-0"
+            },
+            {
+              "id": "Microsoft.MacCatalyst.Sdk.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "164f68f81951c6ad61e7da1d661b067b6e9712be779e417a5cf95326bdc3cbf3",
+              "sha512Base64": "ufpEcXRZBGr6g4uW/PmR5314+JTq4OyMHwVLTYGOKpL/Ql74DZbuC4bRhL68bNzQIwAKy1IF6QBfReLsssv3CA==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.MacCatalyst.Sdk.net10.0_27.0/27.0.10722/Microsoft.MacCatalyst.Sdk.net10.0_27.0.nupkg",
+              "key": "maccatalyst-maccatalyst-sdk-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.MacCatalyst.Sdk.net9.0_18.0",
+              "version": "18.0.9617",
+              "sha256": "54139fccf633f2d39f4b0e9d026d857c54037cd18ab7d3b2f96e27b813fbff79",
+              "sha512Base64": "dthunaHHWj5AAgN+GCff02Y9dUDGaZZniOvYkyuUptUDlt3SKvuep9F9ChGA2gS20QMvq8FGH775113cw6u9kw==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.MacCatalyst.Sdk.net9.0_18.0/18.0.9617/Microsoft.MacCatalyst.Sdk.net9.0_18.0.nupkg",
+              "key": "maccatalyst-maccatalyst-sdk-net9-0_18-0"
+            },
+            {
+              "id": "Microsoft.MacCatalyst.Sdk.net9.0_26.5",
+              "version": "26.5.9004",
+              "sha256": "3f23f369340cc675d098bc2ec496fd13153721e9159d1e7fc9d71bea05a17247",
+              "sha512Base64": "X7DVnqYWp7/Pwcy+SLasJC8LRQv3tZoShB8CLTtPUhotwLyYxNgGPR51OvzoqV/5Sq6bfLWDxdql6z/EaBbXuA==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.MacCatalyst.Sdk.net9.0_26.5/26.5.9004/Microsoft.MacCatalyst.Sdk.net9.0_26.5.nupkg",
+              "key": "maccatalyst-maccatalyst-sdk-net9-0_26-5"
+            },
+            {
+              "id": "Microsoft.MacCatalyst.Templates",
+              "version": "27.0.10722",
+              "sha256": "bb97527ccde271aa5053f4c348673c01f70cf32537e627916534d1a923b93914",
+              "sha512Base64": "kixzBWsr8dG3YWqoKe4sLR+An4UBlgoSCrOIDHKVZ/2QM8/JRKeKYHygcYMxrFbQ+BS7+xAMj+VGrYlCSu1m5w==",
+              "origin": "nuget.org",
+              "installedArchive": "template-packs/microsoft.maccatalyst.templates.27.0.10722.nupkg",
+              "key": "maccatalyst-maccatalyst-templates"
             }
-          },
-          "localEvidence": "Transactional install and offline reuse passed on glibc Linux x86-64; archive, executable, and durable license hashes are rechecked."
+          ]
         },
-        "pymobiledevice3": {
-          "version": "11.26.0",
-          "source": "https://pypi.org/project/pymobiledevice3/11.26.0/",
-          "wheelSha256": "b1ed7fb66211b586618608980201b23ea40d8d02ead77764a0b97a9307341d21",
-          "sdistSha256": "6d41f75472becf84f23661d4d9e15561ec45bbfc3906faa100f0a48ee43feb08",
-          "license": "GPL-3.0-or-later",
-          "requirementsLock": "eng/toolchain/pymobiledevice3-requirements.lock",
-          "requirementsLockSha256": "b76b9db5d691b7ae6d6e377884e7ff070f2545b5749d724fb24dc7d60f3d90d5",
-          "resolvedPythonPackages": 101,
-          "localEvidence": "A hash-enforced isolated portable Python 3.14.8 installation imports pymobiledevice3 and cryptography, reports pymobiledevice3 11.26.0, passes offline reuse, discovers one USB device, and validates one existing lockdown pairing through the redacted probe.",
-          "transitiveLicenseAudit": {
-            "status": "all 101 exact installed distributions reviewed from wheel metadata and embedded notices; private build-only use accepted",
-            "reviewedDistributions": 101,
-            "copyleftExamples": [
-              "pymobiledevice3 and developer-disk-image: GPL-3.0-or-later",
-              "pmd-net-addr, pmd-net-proto, and pmd-pytcp: GPL-3.0-or-later",
-              "pylzss: LGPLv3",
-              "firmware/parser helpers include GPL-3.0-or-later components"
-            ],
-            "metadataConflicts": ["pytun-pmd3", "remotezip2"],
-            "classification": "build-only",
-            "redistribution": "blocked until a release-specific notice/source bundle resolves copyleft obligations and metadata conflicts"
+        {
+          "workloadId": "tvos",
+          "supportClassification": "installed-unqualified",
+          "manifest": {
+            "id": "Microsoft.NET.Sdk.tvOS.Manifest-10.0.100",
+            "version": "27.0.10722",
+            "origin": "unsigned-local-derivative",
+            "officialSha256": "e0a2da03144f3d3444a73a4fbfe428c05897b683af30a8941b9e26b2dae4d200",
+            "officialSha512Base64": "zpEboVYprwxJcL/k15szLXtleBqJdF86wMEJvla6GUJkyX2ONgqatZPKYExvAmiMvKG+ltobdPoCiV0xLjHJSw==",
+            "feedFile": "Microsoft.NET.Sdk.tvOS.Manifest-10.0.100.27.0.10722.nupkg",
+            "sha256": "10846150f48ccf9ddebb5c2dd2d89aa856ffbdd3574fe4810d5482b98d0f5fb7",
+            "sha512Base64": "WrYOen2ZKgzqNjO/mtgYgVTpn9EeH9g4rIrOM/dV5ZkoIcmvv0p1ci7o2S27jsrbrsnpbMVj9yAtIZ/rbXpRIA=="
           },
-          "installerDrift": "The upstream installer uses an unbounded pip install and currently resolves 11.40.0; that path is rejected."
+          "packages": [
+            {
+              "id": "Microsoft.tvOS.Ref.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "432644816c430d50983e69c19c192547165452cc8531ba66ca5021db939e3940",
+              "sha512Base64": "jmpzJrIfMbMfNd6GAIGW60nxmJEFbE2Ynve/R48c8rKTmsD1vaWBptRue/9Hb5uHMne8Kq7+ezUCrJehZjfs6w==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.tvOS.Ref.net10.0_27.0/27.0.10722/Microsoft.tvOS.Ref.net10.0_27.0.nupkg",
+              "key": "tvos-tvos-ref-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.tvOS.Runtime.tvos-arm64.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "e01bb6bc2302ca0cdd8885922b5bbf9076fccf5620258fb91d90c1a07318dbd0",
+              "sha512Base64": "Ks1nsxE3atefkH6ELDxBRZQwdXmjfhY1AEk2smwLYYkl2sgaSfkX6ytGHFaiYeD2gD0AZD/ZR9aVBfhgvyHF6A==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.tvOS.Runtime.tvos-arm64.net10.0_27.0/27.0.10722/Microsoft.tvOS.Runtime.tvos-arm64.net10.0_27.0.nupkg",
+              "key": "tvos-tvos-runtime-tvos-arm64-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.tvOS.Runtime.tvos.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "d7abf551fc73e9d7360e5da7062c22389b18e3b3cd9b0169aac4b127e25d4888",
+              "sha512Base64": "sdiqSl2/oLRhwAoD+E4YJk+UnSZZj67eMxeu/3nIbLugkkQdstpEwRxzjJXjLpyua/ZzH47+b4NaCXIQg8x8/g==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.tvOS.Runtime.tvos.net10.0_27.0/27.0.10722/Microsoft.tvOS.Runtime.tvos.net10.0_27.0.nupkg",
+              "key": "tvos-tvos-runtime-tvos-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.tvOS.Runtime.tvossimulator-arm64.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "6b3bd1594211034ce52a3eecccbf273f0662bf1304d924b547569a9f55f6920e",
+              "sha512Base64": "1vQxwSH5wsp0LqSGlVnMh0RQTpNSUTJ0600+Pcr18F37oIlHkl1SgmdD4tnU6houFxeI/AH2hqT74cM0emZGOQ==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.tvOS.Runtime.tvossimulator-arm64.net10.0_27.0/27.0.10722/Microsoft.tvOS.Runtime.tvossimulator-arm64.net10.0_27.0.nupkg",
+              "key": "tvos-tvos-runtime-tvossimulator-arm64-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.tvOS.Runtime.tvossimulator-x64.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "9a1f2d8a4fea9c44cb64f8399c115f036a1c622b543c4cf2db2950752e61206d",
+              "sha512Base64": "fvwX1v+QcV8eL0RuZJSWuNiA0vgZ4GTk3rJlEOV7A+ny/VyzgpkMf6n27fEVpwtwPlT2HLZvE9P6ItO380li9Q==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.tvOS.Runtime.tvossimulator-x64.net10.0_27.0/27.0.10722/Microsoft.tvOS.Runtime.tvossimulator-x64.net10.0_27.0.nupkg",
+              "key": "tvos-tvos-runtime-tvossimulator-x64-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.tvOS.Sdk.net10.0_26.0",
+              "version": "26.0.11017",
+              "sha256": "dbf3425e7cd5b4f8f2c17960e3d970acb262eee654a30fb4c75b57c50e71e506",
+              "sha512Base64": "bE7Ar3bnhQ5lmqoupFdyQ3seSXpOimWE2FQb+VGyZsj0bJ444ZKEDrun+mtlIswHGt5OP7kJ3M+lh0pP3YtlWQ==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.tvOS.Sdk.net10.0_26.0/26.0.11017/Microsoft.tvOS.Sdk.net10.0_26.0.nupkg",
+              "key": "tvos-tvos-sdk-net10-0_26-0"
+            },
+            {
+              "id": "Microsoft.tvOS.Sdk.net10.0_27.0",
+              "version": "27.0.10722",
+              "sha256": "3a6c91f934010de006993d97f78a1d0375593ec94cf8f421e61b1070167c7770",
+              "sha512Base64": "0Gd28/rbE8+0lht2cRHF1x6T2qRm9oA/azm0OvmvkbdHRgeIAPQlQ44nk+dLeJW5W99Owy36ayKe4TZKxbBeZg==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.tvOS.Sdk.net10.0_27.0/27.0.10722/Microsoft.tvOS.Sdk.net10.0_27.0.nupkg",
+              "key": "tvos-tvos-sdk-net10-0_27-0"
+            },
+            {
+              "id": "Microsoft.tvOS.Sdk.net9.0_18.0",
+              "version": "18.0.9617",
+              "sha256": "fda54c0d7db353cde6a4ff11634abd79cc8679ecbcccc06eb2c37fd97bee6977",
+              "sha512Base64": "R/FqNZebhQ9RWYkmIe6Ke/y4iRDbB9imfQUXnb4kn8taVMpcwimdiMJzH0LrWrIQ+8yxFJEuHzEinVVzTZSqUg==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.tvOS.Sdk.net9.0_18.0/18.0.9617/Microsoft.tvOS.Sdk.net9.0_18.0.nupkg",
+              "key": "tvos-tvos-sdk-net9-0_18-0"
+            },
+            {
+              "id": "Microsoft.tvOS.Sdk.net9.0_26.5",
+              "version": "26.5.9004",
+              "sha256": "d5fa04be29abd684b3b9286622fd6ebb4bb067f4b31592e5c84228f5a0c1c554",
+              "sha512Base64": "ZEMVXr1S0jtdpgCSl5AxMGqZPSRHKa0SpI1o4sBAEej7t1kCeYhK1Ik/pxOblN9aEiesehPFCBYa7/e+T3NaZA==",
+              "origin": "nuget.org",
+              "installedArchive": "packs/Microsoft.tvOS.Sdk.net9.0_26.5/26.5.9004/Microsoft.tvOS.Sdk.net9.0_26.5.nupkg",
+              "key": "tvos-tvos-sdk-net9-0_26-5"
+            },
+            {
+              "id": "Microsoft.tvOS.Templates",
+              "version": "27.0.10722",
+              "sha256": "e81f6e68835e0678970d501a346ea29951875651d382551e92b59b3845ec45e8",
+              "sha512Base64": "wYzuCAWor+bZqP1JyVfuXim3NYUeTgOCFn/6BykKk4PFw7L/moyD888wCP6jA19iXGD44hum9sSLDcn+wBp9hw==",
+              "origin": "nuget.org",
+              "installedArchive": "template-packs/microsoft.tvos.templates.27.0.10722.nupkg",
+              "key": "tvos-tvos-templates"
+            }
+          ]
         }
-      },
-      "hostObservation": {
-        "capturedAtUtc": "2026-10-20T00:00:00Z",
-        "distribution": "EndeavourOS (Arch-like)",
-        "architecture": "x86_64",
-        "present": [
-          "clang 23.1.3",
-          "LLD 23.1.3",
-          "libimobiledevice 1.4.0",
-          "libplist 2.7.0",
-          "libimobiledevice-glue 1.3.2",
-          "libtatsu 1.0.5",
-          "usbmuxd 1.1.1-4 active through udev activation",
-          "zip 3.0-14",
-          "project-owned portable Python 3.14.8 and uv 0.9.10 stage",
-          "project-owned Swift 6.4.0 stage with bundled Clang 21.0.0",
-          "project-owned xtool f0a1f90 stage",
-          "project-owned pymobiledevice3 11.26.0 stage",
-          "project-owned rcodesign 0.29.0 stage",
-          "user-supplied Xcode 27.0 archive and imported iPhoneOS 27.0 SDK"
-        ],
-        "missing": [
-          "operator-approved personalized Developer Disk Image for automated CoreDevice launch"
-        ],
-        "device": "Apple USB vendor/product 05ac:12a8 is visible; usbmuxd is active; redacted probes report one USB device, one valid existing lockdown pairing, successful profile authorization, and successful clean/incremental replacement installation queries. Manual launch and cold relaunch displayed the expected UI and deterministic AOT probe values without observed crash activity; identifiers were not captured."
-      },
-      "scriptReview": {
-        "installerMutations": "May install pacman/AUR packages; write ~/.config/omarchy-apple-dev, ~/.cache/omarchy-apple-dev, ~/.cache/xtool, ~/.local/bin, ~/.local/lib/omarchy-apple-dev, ~/pymobile3-venv, and the active Swift SDK registry; modify SDK bundles and writable SwiftBuild xcspec files; and replace an unhealthy venv.",
-        "deviceMutations": "The default device-run path is not discovery-only: after lockdown and device listing it calls xtool dev run, which builds, signs, installs, and launches. Pairing is only suggested when lockdown info fails; it is not performed automatically.",
-        "discoveryProbe": "eng/toolchain/check-device-transport.py calls the pinned API directly, disables logging, emits only counts and exception class names, never auto-pairs, and uses an ephemeral pairing cache for optional lockdown validation. eng/toolchain/check-xtool-devices.py verifies the staged executable, captures xtool's name/UDID-bearing output only in memory, and emits only counts and status.",
-        "credentialLocations": "xtool authentication is under ~/.local/share/xtool and pairing material is under ~/.pymobiledevice3 and /var/lib/lockdown; none may enter source control or receipts.",
-        "directWorkflow": "eng/toolchain/sign-ios-app.py reads mode-600 P12/profile configuration, signs a copy, and redacts private values. eng/toolchain/device-ios-app.py requires explicit install/launch flags, selects exactly one USB device, uses autopair=False, suppresses library logs, and does not emit identifiers."
-      },
-      "verifiedEvidence": [
-        "built and hashed the selected Swift 6.4.0 and xtool revisions in isolated project-owned prefixes",
-        "enforced all 55 Swift package revisions and the XADI binary artifact checksum without modifying the source cache",
-        "verified relocatable xtool execution with LD_LIBRARY_PATH unset and byte-identical normalized rebuilds",
-        "executed identifier-redacted pymobiledevice3 and xtool discovery; both report one USB device and lockdown validates one existing pairing",
-        "imported the hash-verified Xcode 27 SDK without patching Apple metadata and completed the unsigned HelloIos native-link gate",
-        "staged the hash-verified rcodesign 0.29.0 static Linux x86-64 release transactionally and resolved its release license-inventory exception",
-        "validated a private Apple development identity/profile/device match, signed a copied HelloIos bundle, and installed/queried the expected bundle over USB without auto-pairing or identifier output",
-        "manually launched the clean-build and incremental-build app bundles and observed stable UI with the expected generic, exception, P/Invoke, and native-callback probe results",
-        "force-quit and cold-relaunched the incremental bundle under a redacted read-only syslog observation with no fatal report or crash activity"
-      ],
-      "requiredEvidence": [
-        "supply an operator-approved personalized Developer Disk Image only for automated CoreDevice launch"
       ]
     }
   },

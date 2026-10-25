@@ -8,7 +8,9 @@ neither replaces a published receipt.
 
 | Receipt ID | Scope | Status | Lock SHA-256 | Record |
 | --- | --- | --- | --- | --- |
-| _None yet_ | Sanitized milestone receipt publication is pending. | — | — | — |
+| `XTOOL-NORMALIZER-QUALIFICATION-20261025` | Staged LLVM normalizer qualification | Failed | `ec7cf5d3dec83286663233461391592cebe461f5214baf23b8f1d87bd24f36ef` | [Receipt](XTOOL-NORMALIZER-QUALIFICATION-20261025.json) |
+| `XTOOL-HERMETIC-QUALIFICATION-20261025` | Fixed logical-path and pinned GNU xtool build | Passed | `b18e5fbfdd9d5424a06799adea06b51150020afb060bcec1de8c714bf4fa5b6f` | [Receipt](XTOOL-HERMETIC-QUALIFICATION-20261025.json) |
+| `XTOOL-PORTABLE-PATH-QUALIFICATION-20261025` | Host-neutral namespace-private xtool path | Passed | `9f0b25897d695f66c1539f31d2a6fce3ecfe750d13ae7bc561a69fdfdd582398` | [Receipt](XTOOL-PORTABLE-PATH-QUALIFICATION-20261025.json) |
 
 [`example-receipt.json`](example-receipt.json) is intentionally excluded from
 this table because it is a format example, not an observed result.

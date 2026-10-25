@@ -810,6 +810,7 @@ def install_workload(
         verify_sdk(dotnet, sdk_version, control, env, descriptor)
         if ios_registration_exists(root):
             fail("an ios workload already exists without this installation ownership")
+        manifest_version, manifest_band = expected_manifest.split("/", 1)
         transaction.begin(
             root,
             state_dir / "workload-transaction",
@@ -820,8 +821,14 @@ def install_workload(
             sdk_feature_band=".".join(sdk_version.split(".")[:2])
             + f".{int(sdk_version.split('.')[2]) // 100 * 100}",
             workload_version=workload_version,
-            workload_manifest=expected_manifest,
-            workload_id="ios",
+            workloads=[
+                {
+                    "workloadId": "ios",
+                    "manifestId": "Microsoft.NET.Sdk.iOS",
+                    "manifestVersion": manifest_version,
+                    "manifestFeatureBand": manifest_band,
+                }
+            ],
             control_global_json=str(control / "global.json"),
         )
         state["status"] = "installing"

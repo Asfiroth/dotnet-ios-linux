@@ -102,9 +102,7 @@ def lock_values(path: Path) -> dict[str, str]:
     manifest_url = required_string(lock, "components.iosManifest.source")
     manifest_sha512_base64 = required_string(lock, "components.iosManifest.sha512Base64")
     workload_sha512_base64 = required_string(lock, "components.workloadSet.sha512Base64")
-    xtool_revision = required_string(
-        lock, "components.omarchyAppleDev.components.xtool.revision"
-    )
+    xtool_revision = required_string(lock, "components.hostToolchain.xtool.revision")
 
     values = {
         "project_version": project_version,
@@ -137,20 +135,56 @@ def lock_values(path: Path) -> dict[str, str]:
         "supported_ios_sdk_version": required_string(lock, "components.appleSdk.iosSdkVersion"),
         "locked_xcode_sha256": required_string(lock, "components.appleSdk.archiveSha256"),
         "swift_version": required_string(
-            lock, "components.omarchyAppleDev.components.swift.version"
+            lock, "components.hostToolchain.swift.version"
+        ),
+        "binutils_version": required_string(
+            lock, "components.hostToolchain.binutils.version"
         ),
         "xtool_revision": xtool_revision,
         "xtool_revision_short": xtool_revision[:7],
         "python_version": required_string(
-            lock, "components.omarchyAppleDev.components.portablePython.version"
+            lock, "components.hostToolchain.portablePython.version"
         ),
         "pymobiledevice3_version": required_string(
-            lock, "components.omarchyAppleDev.components.pymobiledevice3.version"
+            lock, "components.hostToolchain.pymobiledevice3.version"
         ),
         "rcodesign_version": required_string(
-            lock, "components.omarchyAppleDev.components.rcodesign.version"
+            lock, "components.hostToolchain.rcodesign.version"
         ),
     }
+    try:
+        companions = lock["components"]["appleCompanionWorkloads"]["workloads"]
+    except (KeyError, TypeError) as error:
+        fail(f"toolchain lock lacks companion manifest records: {error}")
+    if not isinstance(companions, list):
+        fail("companion manifest records are not a list")
+    expected_ids = {"macos", "maccatalyst", "tvos"}
+    seen: set[str] = set()
+    for workload in companions:
+        if not isinstance(workload, dict):
+            fail("companion manifest record is invalid")
+        workload_id = workload.get("workloadId")
+        manifest = workload.get("manifest")
+        if workload_id not in expected_ids or workload_id in seen or not isinstance(manifest, dict):
+            fail("companion manifest records do not describe each direct workload exactly once")
+        seen.add(workload_id)
+        package_id = required_string(manifest, "id")
+        version = required_string(manifest, "version")
+        sha512_base64 = required_string(manifest, "officialSha512Base64")
+        url = (
+            "https://api.nuget.org/v3-flatcontainer/"
+            f"{package_id.lower()}/{version}/{package_id.lower()}.{version}.nupkg"
+        )
+        values[f"{workload_id}_manifest_id"] = package_id
+        values[f"{workload_id}_manifest_version"] = version
+        values[f"{workload_id}_manifest_url"] = url
+        values[f"{workload_id}_manifest_archive"] = archive_name(url, f"{workload_id} manifest")
+        values[f"{workload_id}_manifest_sha512_base64"] = sha512_base64
+        values[f"{workload_id}_manifest_sha512"] = decode_sha512(
+            sha512_base64, f"components.appleCompanionWorkloads.{workload_id}.manifest.officialSha512Base64"
+        )
+    if seen != expected_ids:
+        fail("companion manifest records are incomplete")
     for key in ("sdk_sha512", "locked_xcode_sha256"):
         expected_length = 128 if key == "sdk_sha512" else 64
         if re.fullmatch(rf"[0-9a-f]{{{expected_length}}}", values[key]) is None:
@@ -231,11 +265,11 @@ def version_key(value: str) -> tuple:
 def select_workload(
     root: Path,
     feature_band: str,
-    manifest_version: str,
-    manifest_suffix: str,
+    manifests: dict[str, str],
     fallback: str,
 ) -> dict[str, str]:
-    expected = f"{manifest_version}/{manifest_suffix}"
+    if not manifests:
+        fail("at least one workload manifest identity is required")
     workloadsets = root / "sdk-manifests" / feature_band / "workloadsets"
     matches: list[str] = []
     if workloadsets.is_dir() and not workloadsets.is_symlink():
@@ -243,7 +277,10 @@ def select_workload(
             if path.is_symlink() or not path.is_dir():
                 continue
             mapping = workload_mapping(path / "microsoft.net.workloads.workloadset.json")
-            if mapping is not None and mapping.get("microsoft.net.sdk.ios") == expected:
+            if mapping is not None and all(
+                mapping.get(package_id.casefold()) == identity
+                for package_id, identity in manifests.items()
+            ):
                 matches.append(path.name)
 
     preferred: str | None = None
@@ -362,8 +399,9 @@ def arguments() -> argparse.Namespace:
     workload = subparsers.add_parser("workload")
     workload.add_argument("--root", type=Path, required=True)
     workload.add_argument("--feature-band", required=True)
-    workload.add_argument("--manifest-version", required=True)
-    workload.add_argument("--manifest-suffix", required=True)
+    workload.add_argument("--manifest-version")  # Legacy iOS-only form.
+    workload.add_argument("--manifest-suffix")  # Legacy iOS-only form.
+    workload.add_argument("--manifest", action="append", default=[], metavar="ID=VERSION/BAND")
     workload.add_argument("--fallback", required=True)
 
     xcode = subparsers.add_parser("xcode")
@@ -386,11 +424,23 @@ def main() -> None:
     elif args.command == "sdk":
         value = select_sdk(args.root.expanduser().absolute(), args.feature_band, args.fallback)
     elif args.command == "workload":
+        manifests: dict[str, str] = {}
+        for raw in args.manifest:
+            package_id, separator, identity = raw.partition("=")
+            if separator != "=" or not package_id or "/" not in identity:
+                fail("--manifest must be PACKAGE_ID=VERSION/FEATURE-BAND")
+            folded = package_id.casefold()
+            if folded in manifests:
+                fail(f"duplicate workload manifest package ID: {package_id}")
+            manifests[folded] = identity
+        if not manifests:
+            if args.manifest_version is None or args.manifest_suffix is None:
+                fail("workload requires --manifest or --manifest-version and --manifest-suffix")
+            manifests = {"microsoft.net.sdk.ios": f"{args.manifest_version}/{args.manifest_suffix}"}
         value = select_workload(
             args.root.expanduser().absolute(),
             args.feature_band,
-            args.manifest_version,
-            args.manifest_suffix,
+            manifests,
             args.fallback,
         )
     elif args.command == "xcode":

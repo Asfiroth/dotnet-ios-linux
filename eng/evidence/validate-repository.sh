@@ -85,13 +85,13 @@ if license_hash != license_metadata["sha256"]:
     raise SystemExit("LICENSE hash does not match toolchain.lock.json")
 
 runtime = lock["components"]["monoRuntime"]
-omarchy = lock["components"]["omarchyAppleDev"]
+host_toolchain = lock["components"]["hostToolchain"]
 locked_paths = [
     runtime["compilerConfiguration"]["patch"],
     runtime["linuxAppIntegration"]["gate"],
     *runtime["linuxAppIntegration"]["projectsUnchanged"],
-    omarchy["components"]["xtool"]["completePackageResolvedLock"],
-    omarchy["components"]["pymobiledevice3"]["requirementsLock"],
+    host_toolchain["xtool"]["completePackageResolvedLock"],
+    host_toolchain["pymobiledevice3"]["requirementsLock"],
 ]
 for locked_path in locked_paths:
     if not Path(locked_path).exists():

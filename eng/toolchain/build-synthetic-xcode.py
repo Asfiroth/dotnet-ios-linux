@@ -215,8 +215,21 @@ def build(args: argparse.Namespace) -> None:
         }
         platform_info = {
             "CFBundleIdentifier": "com.apple.platform.iphoneos",
-            "CFBundleName": "iPhoneOS",
+            "CFBundleName": "iOS Platform",
             "CFBundleShortVersionString": version,
+            # SwiftBuild discovers platforms through this schema, rather than
+            # the CFBundle fields consumed by our xcrun shim.  These values are
+            # captured from the hash-verified Xcode 27 iPhoneOS platform
+            # metadata; this remains a deliberately minimal platform surface.
+            "Type": "Platform",
+            "Name": "iphoneos",
+            "Identifier": "com.apple.platform.iphoneos",
+            "Version": version,
+            "Description": "iOS",
+            "FamilyName": "iOS",
+            "FamilyIdentifier": "iphoneos",
+            "FamilyDisplayName": "iOS",
+            "FamilyPlatforms": {"Device": "iphoneos", "Simulator": "iphonesimulator"},
             "AdditionalInfo": {
                 "DTPlatformName": "iphoneos",
                 "DTPlatformVersion": version,
@@ -244,6 +257,13 @@ def build(args: argparse.Namespace) -> None:
 
         toolchain_bin = developer / "Toolchains" / "XcodeDefault.xctoolchain" / "usr" / "bin"
         toolchain_bin.mkdir(parents=True)
+        toolchain_info = {"Identifier": "com.apple.dt.toolchain.XcodeDefault"}
+        # SwiftBuild 6.4 looks for Info.plist, while the source Xcode 27 bundle
+        # carries the equivalent minimal ToolchainInfo.plist.  Emit both with
+        # the same authenticated identity so either discovery convention is
+        # satisfied without pretending that this is a complete Apple toolchain.
+        write_plist(toolchain_bin.parents[1] / "Info.plist", toolchain_info)
+        write_plist(toolchain_bin.parents[1] / "ToolchainInfo.plist", toolchain_info)
         for tool in ("clang", "clang++", "mdimport"):
             (toolchain_bin / tool).symlink_to("../../../../usr/bin/xcrun")
 

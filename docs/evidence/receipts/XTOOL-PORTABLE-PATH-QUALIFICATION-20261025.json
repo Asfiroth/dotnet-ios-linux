@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "id": "XTOOL-PORTABLE-PATH-QUALIFICATION-20261025",
+  "milestone": "M2",
+  "status": "passed",
+  "timestampUtc": "2026-10-25T22:31:30Z",
+  "repositoryRevision": "0b8465b815f652ed9cf59937ee2001e5d69e1eea",
+  "toolchainLockSha256": "9f0b25897d695f66c1539f31d2a6fce3ecfe750d13ae7bc561a69fdfdd582398",
+  "host": {
+    "os": "Linux",
+    "architecture": "x86_64",
+    "distribution": "EndeavourOS",
+    "kernel": "7.2.11-arch1-1",
+    "notes": "Rootless user/mount namespaces were used. Physical build, Swift-stage, and home-directory prefixes were redacted."
+  },
+  "commands": [
+    {
+      "command": "eng/toolchain/setup-swift.sh --destination <swift-a> --cache <downloads>; eng/toolchain/setup-swift.sh --destination <swift-b> --cache <downloads> --offline",
+      "exitCode": 0,
+      "purpose": "Create two independently built, hash-verified Swift stages at distinct physical prefixes."
+    },
+    {
+      "command": "eng/toolchain/setup-binutils.sh --destination <binutils-a> --cache <downloads> --swift-root <swift-a>; eng/toolchain/setup-binutils.sh --destination <binutils-b> --cache <downloads> --swift-root <swift-b> --offline",
+      "exitCode": 0,
+      "purpose": "Reproduce the pinned GNU Binutils stage against both Swift prefixes."
+    },
+    {
+      "command": "eng/toolchain/setup-xtool.sh --source-cache <source> --swift-root <swift-a-or-b> --binutils-root <binutils-a-or-b> --package-cache <swiftpm> --destination <physical-a-or-b>/xtool --diagnostics-dir <evidence-a-or-b> --offline",
+      "exitCode": 1,
+      "purpose": "Run two clean offline builds behind the previous complete-file hash gate and retain the expected path-change mismatch evidence."
+    },
+    {
+      "command": "eng/toolchain/setup-xtool.sh --source-cache <source> --swift-root <swift-a-or-b> --binutils-root <binutils-a-or-b> --package-cache <swiftpm> --destination <accepted-a-or-b>/xtool --offline",
+      "exitCode": 0,
+      "purpose": "Repeat both clean offline builds after accepting the qualified complete-file hash."
+    },
+    {
+      "command": "cmp <accepted-a>/xtool/xtool <accepted-b>/xtool/xtool; cmp <accepted-a>/xtool/libXADI.so <accepted-b>/xtool/libXADI.so; env -u LD_LIBRARY_PATH <each>/xtool --version; env -u LD_LIBRARY_PATH <each>/xtool --help",
+      "exitCode": 0,
+      "purpose": "Require complete byte identity, absence of private prefixes, post-acceptance runtime behavior, dynamic dependency resolution, and reuse."
+    },
+    {
+      "command": "unshare --user --map-root-user --mount --propagation private eng/toolchain/run-in-fixed-mount.sh <physical> /tmp/dotnet-ios-linux/.xtool-build-probe <probe-command>",
+      "exitCode": 0,
+      "purpose": "Verify the neutral parent can be created on a fresh host path, only that parent is overlaid, unrelated /tmp entries remain visible, and the logical child does not persist outside the namespace."
+    }
+  ],
+  "inputHashes": {
+    "qualification-base-toolchain.lock.json": "b18e5fbfdd9d5424a06799adea06b51150020afb060bcec1de8c714bf4fa5b6f",
+    "accepted-toolchain.lock.json": "9f0b25897d695f66c1539f31d2a6fce3ecfe750d13ae7bc561a69fdfdd582398",
+    "binutils-2.47.tar.bz2": "3068128c75cda9f898ccb4211d360246e8e195ffcc9dfb655b23ae23a54800e8",
+    "Swift-6.4.0-archive": "50863678e3bafd91fcbc94c0bb76610bab37c1ee01e335fc7d8616904e03e19a",
+    "xtool-Package.resolved.lock": "978f904cce959c45792fa57baafb4f6f8cbbdda95fbb2d3feb9e25c43b29e89e"
+  },
+  "outputHashes": {
+    "GNU-objcopy-2.47": "33959aff8231f8e050b3603eeddf75bf66e54a41f8cdb382371c202d5be370e0",
+    "GNU-strip-2.47": "705d6ecb90640da4844a9f2b847f077c8d721f1b613adc2f52b3c8daa243d49e",
+    "GNU-readelf-2.47": "9e61a3bb5cbf44dd92504562e751f737e636464d5425c28967323ef7b6545234",
+    "xtool": "c13e2270e6e9d9cce21ba7daae1b51016fcbd50c1bfd2c6747b1ebd208cb168d",
+    "libXADI.so": "eb68bd3dad62f68eac166aad7dc4e8c931013f42a529a8f5d4c520e671375350"
+  },
+  "expectedBehavior": "A fresh Linux host requires no OpenCode-created path. The installer creates a neutral mountpoint and each rootless namespace creates the fixed logical child privately while preserving complete-file verification.",
+  "observedBehavior": "The neutral host mountpoint was created from an absent state. Only that directory was overlaid in the namespace; unrelated /tmp entries remained visible and the logical child was absent afterward. Two clean offline builds from distinct physical, Swift, and Binutils prefixes produced identical final xtool/XADI bytes and static ELF metadata. No physical prefix or superseded OpenCode path was present. Both production-gated builds and reuse passed, and runtime checks ran only after complete hash acceptance.",
+  "limitations": [
+    "Qualification covers glibc Linux x86_64 hosts that permit unprivileged user and mount namespaces.",
+    "It does not independently requalify signing, deployment, launch, device runtime, Rider, or Uno."
+  ],
+  "nextDecision": "Rerun the installer from the successfully restored pre-install state and continue the authentic-Xcode root bootstrap gate.",
+  "redaction": {
+    "performed": true,
+    "excluded": [
+      "home-directory paths",
+      "raw executable artifacts",
+      "complete build logs"
+    ],
+    "notes": "Exact inputs, outputs, command shapes, namespace behavior, and bounded results are retained without private prefixes."
+  },
+  "localLogReferences": [
+    "operator-controlled portable-path qualification logs retained outside the repository"
+  ]
+}

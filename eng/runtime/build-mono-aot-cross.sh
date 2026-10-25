@@ -6,7 +6,11 @@ readonly llvm_config_version="19.1.0-mono"
 readonly llvm_package_version="19.1.0-alpha.1.25461.1"
 readonly llvm_source_commit="2cfe42ea4a7fe364dcb197beca469af8edec0ad6"
 readonly target_triple="aarch64-apple-darwin10"
-readonly expected_compiler_sha256="c85a0aad43764e9d17077f23faf6e638e79b47b315263116b2350038d977866d"
+readonly canonical_source_prefix="/usr/src/dotnet-runtime"
+readonly canonical_build_prefix="/usr/build/dotnet-ios-linux/mono-aot"
+readonly canonical_install_prefix="/usr/lib/dotnet-ios-linux/mono-aot"
+readonly canonical_llvm_prefix="/usr/lib/dotnet-ios-linux/llvm"
+readonly expected_compiler_sha256="55dcaa7bf9dd71206ff8f69a26e0eacd79af7146b2a0f7a1143c3d9e0d3267e7"
 
 usage() {
     cat <<'EOF'
@@ -57,6 +61,10 @@ source_root="$(realpath "$source_root")"
 mkdir -p "$build_root" "$install_root"
 build_root="$(realpath "$build_root")"
 install_root="$(realpath "$install_root")"
+[[ "$source_root" != "$build_root" && "$source_root" != "$install_root" && "$build_root" != "$install_root" ]] || {
+    printf 'source, build, and install roots must be distinct\n' >&2
+    exit 2
+}
 actual_revision="$(git -C "$source_root" rev-parse HEAD)"
 [[ "$actual_revision" == "$expected_revision" ]] || {
     printf 'runtime revision mismatch: expected %s, got %s\n' "$expected_revision" "$actual_revision" >&2
@@ -84,6 +92,8 @@ cat > "$version_directory/runtime_version.h" <<'EOF'
 #define RuntimeProductVersion 10.0.12
 EOF
 
+prefix_map_flags="-ffile-prefix-map=$source_root=$canonical_source_prefix -ffile-prefix-map=$build_root=$canonical_build_prefix -ffile-prefix-map=$install_root=$canonical_install_prefix"
+
 cmake_arguments=(
     -S "$source_root/src/mono"
     -B "$build_root"
@@ -91,6 +101,8 @@ cmake_arguments=(
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_C_COMPILER=clang
     -DCMAKE_CXX_COMPILER=clang++
+    "-DCMAKE_C_FLAGS=$prefix_map_flags"
+    "-DCMAKE_CXX_FLAGS=$prefix_map_flags"
     "-DCMAKE_INSTALL_PREFIX=$install_root"
     "-DAOT_TARGET_TRIPLE=$target_triple"
     "-DAOT_OFFSETS_FILE=$source_root/src/mono/mono/offsets/aarch64-apple-darwin10.h"
@@ -142,13 +154,17 @@ PY
     cmake_arguments+=(
         "-DENABLE_LLVM=1"
         "-DLLVM_PREFIX=$llvm_root"
-        "-DCMAKE_CXX_FLAGS=-I$llvm_root/include/c++/v1 -L$llvm_root/lib -stdlib=libc++"
+        "-DCMAKE_C_FLAGS=$prefix_map_flags -ffile-prefix-map=$llvm_root=$canonical_llvm_prefix"
+        "-DCMAKE_CXX_FLAGS=-I$llvm_root/include/c++/v1 -L$llvm_root/lib -stdlib=libc++ $prefix_map_flags -ffile-prefix-map=$llvm_root=$canonical_llvm_prefix"
     )
     mode="llvm"
 else
     cmake_arguments+=("-DENABLE_LLVM=0")
 fi
 
+export LC_ALL=C
+export TZ=UTC
+export SOURCE_DATE_EPOCH=0
 cmake "${cmake_arguments[@]}"
 cmake --build "$build_root" --target install --parallel "$jobs"
 
@@ -167,11 +183,13 @@ fi
 read -r magic < <(od -An -tx1 -N4 "$compiler" | tr -d ' ')
 [[ "$magic" == "7f454c46" ]] || { printf 'compiler is not an ELF executable\n' >&2; exit 1; }
 compiler_sha256="$(sha256sum -b "$compiler" | cut -d' ' -f1)"
-[[ "$compiler_sha256" == "$expected_compiler_sha256" ]] || {
-    printf 'compiler output hash mismatch: expected %s, got %s\n' \
-        "$expected_compiler_sha256" "$compiler_sha256" >&2
-    exit 1
-}
+if [[ "$mode" == llvm ]]; then
+    [[ "$compiler_sha256" == "$expected_compiler_sha256" ]] || {
+        printf 'compiler output hash mismatch: expected %s, got %s\n' \
+            "$expected_compiler_sha256" "$compiler_sha256" >&2
+        exit 1
+    }
+fi
 
 version_output="$($compiler --version)"
 if [[ "$mode" == llvm ]]; then
@@ -181,20 +199,39 @@ if [[ "$mode" == llvm ]]; then
     }
 fi
 
-python3 - "$install_root/aot-build-provenance.json" "$actual_revision" "$mode" "$target_triple" "$llvm_package_version" "$llvm_source_commit" <<'PY'
+python3 - "$install_root/aot-build-provenance.json" "$actual_revision" "$mode" "$target_triple" "$llvm_package_version" "$llvm_source_commit" "$compiler_sha256" "$canonical_source_prefix" "$canonical_build_prefix" "$canonical_install_prefix" "$canonical_llvm_prefix" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-path, revision, mode, triple, llvm, llvm_commit = sys.argv[1:]
+(
+    path,
+    revision,
+    mode,
+    triple,
+    llvm,
+    llvm_commit,
+    compiler_sha256,
+    source_prefix,
+    build_prefix,
+    install_prefix,
+    llvm_prefix,
+) = sys.argv[1:]
 Path(path).write_text(json.dumps({
-    "schemaVersion": 1,
+    "schemaVersion": 2,
+    "state": "verified" if mode == "llvm" else "feasibility",
     "runtimeCommit": revision,
     "targetTriple": triple,
     "llvmMode": mode,
     "matchedLlvmPackageVersion": llvm if mode == "llvm" else None,
     "matchedLlvmSourceCommit": llvm_commit if mode == "llvm" else None,
-    "compilerSha256": "c85a0aad43764e9d17077f23faf6e638e79b47b315263116b2350038d977866d",
+    "compilerSha256": compiler_sha256,
+    "pathNormalization": {
+        "source": source_prefix,
+        "build": build_prefix,
+        "install": install_prefix,
+        "llvm": llvm_prefix if mode == "llvm" else None,
+    },
 }, indent=2) + "\n", encoding="utf-8")
 PY
 

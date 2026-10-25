@@ -43,12 +43,14 @@ and requires its `MonoAotCrossCompiler` item to resolve to the staged
 `ios-arm64` Linux compiler.
 
 `verify-workload-lifecycle.sh` creates an isolated SDK root from the locked SDK
-archive, generates the local derivative feed, and exercises workload update,
-install, list, restore, repair, uninstall, clean, and reinstall. With a
+archive, generates the local derivatives feed, and exercises all-four direct
+Apple workload update, install, list, restore, repair, uninstall, clean, and
+reinstall. With a
 `--developer-dir`, it also builds unchanged copies of `HelloIos` and `AotProbe`
 through LLVM AOT. Each installed official package archive is hash-checked and
 must pass NuGet author/repository signature verification; local derivative
 packages must remain unsigned. It never operates on `~/.dotnet`.
 The update/uninstall commands here are isolated SDK behavior gates; the
-production installer invokes only pinned `workload install ios` and performs
-receipt-backed teardown itself.
+production writable-root installer invokes one pinned all-four install command
+and performs receipt-backed teardown itself. Companion registrations remain
+unqualified for Linux execution.

@@ -16,8 +16,9 @@ published. Automated CoreDevice launch, Rider, stock `uno-check`, minimal Uno,
 and negative deployment coverage remain separate unpassed gates; see the
 [compatibility matrix](docs/status/compatibility-matrix.md).
 
-Private/local isolated exercises report install, update, list, restore, repair,
-uninstall, clean, reinstall, rollback, and real Android/Wasm coexistence. A
+Private/local isolated exercises report all-four registration, update, list,
+restore, repair, uninstall, clean, reinstall, rollback, and real Android/Wasm
+coexistence. A
 complete top-level bootstrap run is still pending because validation has the
 extracted `Xcode.app`, not an original XIP archive that exercises the complete
 import path required by the installer.
@@ -46,6 +47,23 @@ source "${XDG_DATA_HOME:-$HOME/.local/share}/dotnet-ios-linux/activate"
 ./install.sh doctor
 ```
 
+Before installation, inspect the active host root without invoking `dotnet` or
+creating project data/cache roots:
+
+```sh
+./install.sh preflight
+```
+
+Preflight reports actual installed workload markers, then uses the selected
+workload set and manifest `extends` metadata to identify Apple workloads. It
+does not invent absent workloads or install anything. `ios` is the only Linux
+runtime/device-supported Apple workload. Default writable-root installation
+also registers the exact locked `macos`, `maccatalyst`, and `tvos` workloads,
+but they are **registration-only**: no Linux build, runtime, signing,
+deployment, launch, Rider, or Uno support is claimed. iOS-derived and mixed
+aggregates are unqualified, not broad MAUI support: `mixed-unqualified` means a
+closure with a non-Apple leaf or with `ios` plus another Apple root.
+
 The lock records the known SHA-256 of the validated baseline archive. That
 known-hash validation applies only to the baseline. A non-baseline compatible
 XIP is not matched to a known repository hash: its bounded XIP metadata and
@@ -68,13 +86,21 @@ Useful install options:
 
 # Reuse complete, hash-verified caches without downloads.
 ./install.sh install --xcode-archive /private/path/Xcode_27.xip --offline
+
+# Preserve a pre-existing direct registration as external/unqualified.
+./install.sh install --xcode-archive /private/path/Xcode_27.xip \
+  --keep-existing ios
 ```
 
 `--offline` is fail-closed: every required archive, source checkout, SwiftPM
 dependency, Python wheel, LLVM package, and workload package must already be in
 the project cache. `--jobs N` controls the Mono compiler build. `--yes` suppresses
 the installation and privilege-boundary confirmations; it does not suppress a
-password prompt from `sudo`.
+password prompt from `sudo`. `--keep-existing` may be repeated for `ios`,
+`macos`, `maccatalyst`, or `tvos`; it requires that registration to already
+exist with the exact locked manifest version and feature band, and leaves it
+external/unqualified. A different existing registration fails before the CLI
+transaction begins; uninstall or a separately qualified migration is required.
 
 Installation locations are selected by policy:
 
@@ -106,6 +132,12 @@ The helper validates every root ancestor immediately before privileged execution
 and its workload children inherit the root lifecycle lock so a terminated helper
 cannot release recovery while an orphaned mutator still runs.
 
+The privileged helper currently supports only the established iOS system-root
+path. It reports a `system-root-ios-only` registration scope in `--dry-run` and
+records only `ios` in its receipt; companion registration is deferred until it
+has the same aggregate recovery and restoration coverage as writable-root
+installation. `--keep-existing` is rejected for a system root.
+
 Within the selected host root, the resolver selects the newest installed stable
 SDK version in the locked feature band. This is version and feature-band
 compatibility selection, not hash validation of the pre-existing SDK. In a
@@ -113,12 +145,13 @@ writable root only, it installs the lock's hash-verified fallback if no eligible
 SDK is present.
 
 In a writable root, it reuses an installed workload set only when its
-`microsoft.net.workloads.workloadset.json` maps `Microsoft.NET.Sdk.iOS` to the
-locked iOS manifest. The current installed set is preferred; otherwise the
-newest matching installed set is selected. If no matching set exists, the
-lock's hash-verified fallback workload set is installed. A private `global.json`
-pins the selected SDK and workload-set versions for the transaction, and the
-resulting workload graph is still verified against the lock.
+`microsoft.net.workloads.workloadset.json` maps all four direct Apple manifest
+identities (`iOS`, `macOS`, `MacCatalyst`, and `tvOS`) to the locked versions.
+The current installed set is preferred; otherwise the newest matching installed
+set is selected. If no matching set exists, the lock's hash-verified fallback
+workload set is installed. A private `global.json` pins the selected SDK and
+workload-set versions for the transaction, and the resulting workload graph is
+still verified against the lock.
 
 A non-writable root is stricter: it must already contain a compatible SDK, and
 the selected workload-set version must equal the lock. The installer never
@@ -137,10 +170,10 @@ The recorded M2–M9 device evidence covers the baseline stack only. Accepting a
 different compatible XIP or installed SDK patch is an installer compatibility
 result, not additional physical-device validation.
 
-The installer verifies every archive in the 12-package direct graph against
-`toolchain.lock.json`. Official NuGet archives must also pass author/repository
-signature verification; the deterministic local derivative and project packs
-are explicitly unsigned and hash-trusted. Downloads and staged directories use
+The installer verifies every archive in the selected direct Apple workload
+closures against `toolchain.lock.json`. Official NuGet archives must also pass
+author/repository signature verification; deterministic local derivatives and
+project packs are explicitly unsigned and hash-trusted. Downloads and staged directories use
 randomized reservations and atomic no-clobber publication. It does not edit
 shell startup files. After installation it prints the appropriate `~/.bashrc`
 or `~/.zshrc` `PATH` entry for `run-ios-app.sh` and the command that reloads the
@@ -216,16 +249,19 @@ managed-debugger integration.
 ```
 
 Uninstall preflights hashes and restores only receipt-owned workload and durable
-entries, plus the fallback SDK when this installer had to add it. A compatible
-SDK that predated installation is never owned or removed. Uninstall preserves
-unrelated SDKs, later workloads, workload history, and unknown files. A changed
-owned file blocks removal rather than being erased. Workload teardown uses the
-transaction's exact path/key restoration rather than a broad `dotnet workload
-uninstall`. It holds the SDK-interoperable lock on
+entries, plus the fallback SDK when this installer had to add it. It restores
+snapshotted predecessor Apple bytes/metadata rather than removing an external
+`--keep-existing` registration. A compatible SDK that predated installation is
+never owned or removed. Uninstall preserves unrelated SDKs, later workloads,
+workload history, and unknown files. A changed owned file blocks removal rather
+than being erased. Workload teardown uses the transaction's exact path/key
+restoration rather than a broad `dotnet workload uninstall`. It holds the SDK-interoperable lock on
 `globaljsonworkloadsets.json` while checking same-set consumers and publishing
 the owned key change last. If another recorded global JSON selects the same
 workload set, exact shared packs, manifests, workload-set data, and installation
 records are retained.
+Global foreign `InstalledPacks` reconciliation deltas are journaled for
+diagnosis but are never restored or replayed during rollback/uninstall.
 If that shared state depends on a fallback SDK added by this installer, its
 intact files are also retained and their project ownership receipt is
 relinquished rather than deleting an SDK another recorded consumer may use.
@@ -243,9 +279,13 @@ requires shared resources to remain.
 - Xcode and Apple SDKs must be operator-supplied; they are neither downloaded
   nor redistributed by the project. Compatibility and non-baseline trust
   boundaries are defined in the installation section above.
-- Swift 6.4.0, ncurses 6.6, libxml2 2.13.9, portable CPython 3.14.8, uv 0.9.10,
-  xtool, rcodesign, pymobiledevice3, LLVM, and every workload package are pinned
-  and hash checked.
+- Swift 6.4.0, ncurses 6.6, libxml2 2.13.9, source-built GNU Binutils 2.47,
+  portable CPython 3.14.8, uv 0.9.10, xtool, rcodesign, pymobiledevice3, LLVM,
+  and every workload package are pinned and hash checked. xtool builds require
+  an unprivileged user/mount namespace so physical SwiftPM scratch paths cannot
+  enter runtime `#file` strings. The installer creates a neutral
+  `/tmp/dotnet-ios-linux` mountpoint and overlays only that directory privately;
+  no OpenCode-specific host path is required.
 - LLVM is mandatory in the installed AOT pack. A non-LLVM feasibility artifact
   cannot enter the workload feed.
 - The complete installer refuses effective UID 0. Privileged workload commands
@@ -275,6 +315,13 @@ update because they can change runtime/AOT pack inputs.
 
 Simulator support, Linux arm64/musl, NativeAOT, CoreCLR, wireless deployment,
 managed debugging, hot reload, and App Store distribution are outside this MVP.
+
+Mac Catalyst, tvOS, macOS, and broad MAUI remain outside the Linux runtime
+scope. Writable-root setup registers the locked direct Mac Catalyst, tvOS, and
+macOS workloads, but this is registration-only and does not qualify those
+targets. A workload reaching only a non-iOS Apple root is reference-only for
+execution; iOS-derived and mixed workloads remain unqualified. A resolvable
+manifest or reference pack is not execution evidence.
 
 ## Validation and documentation
 

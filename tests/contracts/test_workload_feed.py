@@ -9,6 +9,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -47,6 +48,30 @@ def official_files() -> dict[str, bytes]:
     }
 
 
+def companion_files(workload_id: str) -> dict[str, bytes]:
+    package_id = feed.COMPANION_MANIFESTS[workload_id]["id"]
+    manifest = {
+        "version": feed.MANIFEST_VERSION,
+        "workloads": {
+            workload_id: {
+                "description": workload_id,
+                "packs": [f"Example.{workload_id}.Sdk"],
+                "extends": [f"microsoft-net-runtime-{workload_id}"],
+            }
+        },
+        "packs": {f"Example.{workload_id}.Sdk": {"kind": "sdk", "version": feed.MANIFEST_VERSION}},
+    }
+    nuspec = f"<package><metadata><id>{package_id}</id><version>{feed.MANIFEST_VERSION}</version></metadata></package>"
+    return {
+        f"{package_id}.nuspec": nuspec.encode(),
+        "Icon.png": b"icon",
+        "LICENSE": b"license",
+        "data/WorkloadDependencies.json": b"{}\n",
+        "data/WorkloadManifest.json": (json.dumps(manifest) + "\n").encode(),
+        "data/WorkloadManifest.targets": b"<Project>\n</Project>\n",
+    }
+
+
 class WorkloadFeedContracts(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="dotnet-ios-linux-feed-")
@@ -70,14 +95,29 @@ class WorkloadFeedContracts(unittest.TestCase):
             manifest["packs"][feed.AOT_PACK_ID],
         )
 
-    def test_derived_targets_import_both_project_packs(self) -> None:
+    def test_derived_targets_import_both_project_packs_for_ios_only(self) -> None:
         targets = feed.derive_manifest(official_files())["data/WorkloadManifest.targets"].decode()
         self.assertIn('Sdk="DotnetIosLinux.Sdk"', targets)
         self.assertIn(
             'Sdk="DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64"', targets
         )
         self.assertIn("IsOSPlatform('linux')", targets)
+        self.assertIn("'$(TargetPlatformIdentifier)' == 'iOS'", targets)
+        for identifier in ("MacCatalyst", "tvOS", "macOS", "watchOS"):
+            self.assertNotIn(f"'$(TargetPlatformIdentifier)' == '{identifier}'", targets)
         self.assertIn("<Project>", targets)
+
+    def test_companion_derivatives_are_linux_registration_only(self) -> None:
+        for workload_id in feed.COMPANION_MANIFESTS:
+            with self.subTest(workload_id=workload_id):
+                derived = feed.derive_companion_manifest(companion_files(workload_id), workload_id)
+                manifest = json.loads(derived["data/WorkloadManifest.json"])
+                workload = manifest["workloads"][workload_id]
+                self.assertEqual(["linux-x64"], workload["platforms"])
+                self.assertNotIn("extends", workload)
+                marker = json.loads(derived["data/dotnet-ios-linux.json"])
+                self.assertEqual("installed-unqualified", marker["supportClassification"])
+                self.assertEqual(workload_id, marker["workloadId"])
 
     def test_project_sdk_package_is_deterministic(self) -> None:
         first = self.root / "first.nupkg"
@@ -90,44 +130,22 @@ class WorkloadFeedContracts(unittest.TestCase):
             self.assertIn("Sdk/Sdk.targets", archive.namelist())
             self.assertIn("LICENSE", archive.namelist())
 
-    def test_aot_pack_requires_llvm_and_matching_hashes(self) -> None:
+    def test_aot_pack_uses_the_canonical_runtime_verifier(self) -> None:
         root = self.root / "aot"
-        (root / "Sdk").mkdir(parents=True)
-        (root / "tools").mkdir()
-        (root / "Sdk" / "Sdk.props").write_text("<Project />\n", encoding="utf-8")
-        payloads = {name: f"locked-{name}".encode() for name in feed.EXPECTED_AOT_FILES}
-        expected = {name: hashlib.sha256(data).hexdigest() for name, data in payloads.items()}
-        for name, data in payloads.items():
-            path = root / "tools" / name
-            path.write_bytes(data)
-            path.chmod(0o755 if name in {"mono-aot-cross", "llc", "opt"} else 0o644)
-        provenance = {
-            "packageId": feed.AOT_PACK_ID,
-            "runtimeCommit": feed.RUNTIME_COMMIT,
-            "llvmMode": "llvm",
-            "files": expected,
-        }
-        (root / "provenance.json").write_text(json.dumps(provenance), encoding="utf-8")
-        original = feed.EXPECTED_AOT_FILES
-        try:
-            feed.EXPECTED_AOT_FILES = expected
+        root.mkdir()
+        with mock.patch.object(feed.AOT_PACKAGER, "verify_published_aot_pack") as verify:
             feed.verify_aot_pack(root)
+            verify.assert_called_once_with(root)
 
-            provenance["llvmMode"] = "without-llvm"
-            (root / "provenance.json").write_text(json.dumps(provenance), encoding="utf-8")
+            verify.side_effect = SystemExit("wrong AOT pack")
             with self.assertRaises(SystemExit):
                 feed.verify_aot_pack(root)
-        finally:
-            feed.EXPECTED_AOT_FILES = original
-
-        provenance["llvmMode"] = "llvm"
-        (root / "provenance.json").write_text(json.dumps(provenance), encoding="utf-8")
-        with self.assertRaises(SystemExit):
-            feed.verify_aot_pack(root)
 
     def test_nuget_source_mapping_prefers_exact_project_ids(self) -> None:
         config = feed.nuget_config(self.root / "feed")
         self.assertIn(f'<package pattern="{feed.MANIFEST_ID}" />', config)
+        for spec in feed.COMPANION_MANIFESTS.values():
+            self.assertIn('<package pattern="%s" />' % spec["id"], config)
         self.assertIn(f'<package pattern="{feed.SDK_PACK_ID}" />', config)
         self.assertIn(f'<package pattern="{feed.AOT_PACK_ID}" />', config)
         self.assertIn('<package pattern="*" />', config)

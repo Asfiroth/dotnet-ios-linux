@@ -40,8 +40,11 @@ source commit, and overlays their `tools/linux-x64` payloads into one
 the complete assembled root before reuse, even when the package cache has been
 deleted. New roots and AOT pack directories are published atomically without
 replacing a concurrently created path; explicit replacement of a verified owned
-LLVM root uses an atomic directory exchange. `--without-llvm` is available only
-as an explicit feasibility mode;
+LLVM root uses an atomic directory exchange. The Mono compiler cache follows the
+same protocol: it is built in a temporary sibling directory and published only
+after the compiler payload, matched LLVM dependencies, and provenance record
+verify. An executable without `aot-build-provenance.json` is incomplete and is
+discarded rather than reused. `--without-llvm` is available only as an explicit feasibility mode;
 the installer never accepts a non-LLVM pack and no script accepts and ignores
 `--llvm`.
 
@@ -53,6 +56,15 @@ runtime libraries beside `mono-aot-cross`; its `$ORIGIN` runtime path therefore
 does not depend on an ambient `LD_LIBRARY_PATH`. Pack staging requires the
 adjacent compiler-build provenance file and rejects a copied or mismatched
 binary/root combination.
+
+The build applies canonical `-ffile-prefix-map` values for the runtime source,
+build directory, install directory, and LLVM root, and sets a deterministic
+locale/time environment. This makes the compiler artifact independent of the
+operator's cache path. The current reproducible compiler SHA-256 is recorded in
+`toolchain.lock.json` under
+`components.monoRuntime.compilerConfiguration.reproducibleCompilerSha256`.
+The historical smoke/device hashes in that lock remain observations of the
+original evidence runs.
 
 `verify-source.sh` permits only the exact pinned runtime commit in either a
 pristine state or with the byte-for-byte locked three-file patch. Staged,

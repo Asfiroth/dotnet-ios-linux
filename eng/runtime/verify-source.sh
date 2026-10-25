@@ -6,8 +6,8 @@ readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly expected_revision="4271d88e0aebf3d04f188f1334c2220d80555ef6"
 readonly patch_file="$script_dir/patches/0001-linux-host-apple-mobile-aot-cross.patch"
 readonly patch_sha256="b1692993777490b4513d60f7fc0140db5eca8c7d8cdd06ec33fe46bc9724e67c"
-readonly expected_diff_sha256="$patch_sha256"
 readonly expected_paths=$'src/mono/mono/mini/aot-compiler.c\nsrc/mono/mono/mini/aot-runtime.c\nsrc/mono/mono/utils/mono-dl-darwin.c'
+readonly expected_post_patch_blobs=$'src/mono/mono/mini/aot-compiler.c\t7e756d354bba46cd5f7dfd1f1827e477172c3853\nsrc/mono/mono/mini/aot-runtime.c\tbced8e047d61a458cbccea86d1ff491aa24460be\nsrc/mono/mono/utils/mono-dl-darwin.c\t7235aa1e7c055b320c0731bba3f7ceae257cf845'
 
 usage() {
     printf 'Usage: verify-source.sh --source <dotnet-runtime-checkout> --state <pristine|patched|either>\n'
@@ -66,12 +66,16 @@ actual_paths="$(git -C "$source_root" diff --name-only HEAD -- | LC_ALL=C sort)"
     printf 'runtime checkout contains changes outside the locked patch:\n%s\n' "$actual_paths" >&2
     exit 1
 }
-readarray -t patch_paths <<< "$expected_paths"
-actual_diff_sha256="$(git -C "$source_root" diff --binary --no-ext-diff HEAD -- "${patch_paths[@]}" | sha256sum | cut -d' ' -f1)"
-[[ "$actual_diff_sha256" == "$expected_diff_sha256" ]] || {
-    printf 'runtime source changes do not exactly match the locked patch\n' >&2
-    exit 1
-}
+while IFS=$'\t' read -r path expected_blob; do
+    actual_blob="$(git -C "$source_root" hash-object "$path")" || {
+        printf 'cannot hash expected patched runtime file: %s\n' "$path" >&2
+        exit 1
+    }
+    [[ "$actual_blob" == "$expected_blob" ]] || {
+        printf 'runtime patched file has an unexpected content hash: %s\n' "$path" >&2
+        exit 1
+    }
+done <<< "$expected_post_patch_blobs"
 [[ "$expected_state" != pristine ]] || {
     printf 'runtime checkout is patched but pristine source was required\n' >&2
     exit 1

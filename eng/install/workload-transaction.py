@@ -8,6 +8,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import sys
@@ -27,7 +28,7 @@ from atomic import (
 
 
 OWNER = "dotnet-ios-linux"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 STATE_NAME = "transaction.json"
 UNIT_ROOTS = {"packs", "template-packs", "library-packs"}
 
@@ -127,6 +128,18 @@ def read_state(transaction: Path, root: Path) -> dict:
         details = snapshots.get(label)
         if not isinstance(details, dict) or details.get("path") != relative.as_posix():
             fail(f"transaction has an invalid {label} snapshot path")
+    predecessor = value.get("predecessorUnits", {})
+    if not isinstance(predecessor, dict):
+        fail("transaction lacks predecessor workload snapshots")
+    for raw, expected_hash in predecessor.items():
+        if not isinstance(raw, str) or not isinstance(expected_hash, str):
+            fail("transaction has an invalid predecessor workload snapshot")
+        source = transaction / "before-units" / safe_relative(raw, UNIT_ROOTS)
+        if tree_hash(source) != expected_hash:
+            fail(f"predecessor workload snapshot changed: {source}")
+    protected_predecessor = value.get("protectedPredecessorUnits", {})
+    if not isinstance(protected_predecessor, dict) or not set(protected_predecessor).issubset(predecessor):
+        fail("transaction has invalid protected predecessor workload snapshots")
     return value
 
 
@@ -137,6 +150,33 @@ def safe_relative(raw: str, allowed_roots: set[str] | None = None) -> Path:
     if allowed_roots is not None and value.parts[0] not in allowed_roots:
         fail(f"receipt path is outside the workload unit roots: {raw!r}")
     return Path(*value.parts)
+
+
+def require_safe_path(root: Path, relative: Path, label: str) -> Path:
+    """Return a path below a real root after rejecting symlink ancestors.
+
+    Workload metadata contains mutable state consumed by the CLI. Checking only
+    a final leaf is insufficient: a symlinked ``metadata`` or ``sdk-manifests``
+    ancestor would redirect snapshots and restoration outside the selected
+    .NET root.
+    """
+
+    if root.is_symlink() or not root.is_dir() or root.resolve() != root:
+        fail(f".NET root is not a real directory: {root}")
+    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        fail(f"unsafe {label} path: {relative}")
+    current = root
+    for index, part in enumerate(relative.parts):
+        current /= part
+        if not os.path.lexists(current):
+            # Later components cannot exist when this one does not. It is safe
+            # for a transaction to create the remaining path itself.
+            break
+        if current.is_symlink():
+            fail(f"{label} has a symlink ancestor: {current}")
+        if index < len(relative.parts) - 1 and not current.is_dir():
+            fail(f"{label} ancestor is not a directory: {current}")
+    return root / relative
 
 
 def validate_component(value: str, label: str) -> str:
@@ -157,17 +197,31 @@ def expected_snapshot_paths(state: dict) -> dict[str, Path]:
     if not isinstance(context, dict):
         fail("transaction lacks workload ownership context")
     sdk_band = validate_component(context.get("sdkFeatureBand"), "SDK feature band")
-    manifest_band = validate_component(context.get("manifestFeatureBand"), "manifest feature band")
+    workloads = [
+        *(context.get("workloads") or []),
+        *(context.get("protectedWorkloads") or []),
+        *(context.get("predecessorWorkloads") or []),
+    ]
+    if not isinstance(workloads, list) or not workloads:
+        fail("transaction lacks managed workload descriptors")
+    manifest_bands = sorted(
+        {
+            validate_component(item.get("manifestFeatureBand"), "manifest feature band")
+            for item in workloads
+            if isinstance(item, dict)
+        }
+    )
+    if not manifest_bands:
+        fail("transaction lacks a manifest feature band")
     workload_set_band = validate_component(
         context.get("workloadSetFeatureBand"), "workload-set feature band"
     )
-    result = {
-        "workloadMetadata": Path("metadata/workloads"),
-        "manifestBand": Path("sdk-manifests") / manifest_band,
-        "workloadSetBand": Path("sdk-manifests") / workload_set_band,
-    }
-    if manifest_band == workload_set_band:
-        result.pop("workloadSetBand")
+    result = {"workloadMetadata": Path("metadata/workloads")}
+    for index, manifest_band in enumerate(manifest_bands):
+        label = "manifestBand" if len(manifest_bands) == 1 else f"manifestBand-{index}"
+        result[label] = Path("sdk-manifests") / manifest_band
+    if workload_set_band not in manifest_bands:
+        result["workloadSetBand"] = Path("sdk-manifests") / workload_set_band
     if sdk_band != workload_set_band:
         fail("selected SDK and workload set use different feature bands")
     return result
@@ -179,16 +233,18 @@ def snapshot_items(state: dict):
 
 
 def pack_units(root: Path) -> dict[str, str]:
-    packs = root / "packs"
+    packs = require_safe_path(root, Path("packs"), "pack root")
     result: dict[str, str] = {}
-    if not packs.is_dir() or packs.is_symlink():
+    if not os.path.lexists(packs):
         return result
+    if packs.is_symlink() or not packs.is_dir():
+        fail(f"pack root is not a real directory: {packs}")
     for package in packs.iterdir():
         if package.is_symlink() or not package.is_dir():
-            continue
+            fail(f"pack package is not a real directory: {package}")
         for version in package.iterdir():
             if version.is_symlink() or not version.is_dir():
-                continue
+                fail(f"pack version is not a real directory: {version}")
             relative = version.relative_to(root).as_posix()
             result[relative] = tree_hash(version) or ""
     return result
@@ -197,10 +253,14 @@ def pack_units(root: Path) -> dict[str, str]:
 def loose_units(root: Path) -> dict[str, str]:
     result: dict[str, str] = {}
     for directory_name in ("template-packs", "library-packs"):
-        directory = root / directory_name
-        if not directory.is_dir() or directory.is_symlink():
+        directory = require_safe_path(root, Path(directory_name), "workload unit root")
+        if not os.path.lexists(directory):
             continue
+        if not directory.is_dir() or directory.is_symlink():
+            fail(f"workload unit root is not a real directory: {directory}")
         for child in directory.iterdir():
+            if child.is_symlink():
+                fail(f"workload unit is a symlink: {child}")
             relative = child.relative_to(root).as_posix()
             result[relative] = tree_hash(child) or ""
     return result
@@ -208,6 +268,314 @@ def loose_units(root: Path) -> dict[str, str]:
 
 def current_units(root: Path) -> dict[str, str]:
     return pack_units(root) | loose_units(root)
+
+
+def relaxed_json_file(path: Path, label: str) -> dict:
+    try:
+        raw = path.read_text(encoding="utf-8-sig")
+        value = json.loads(re.sub(r",(?=\s*[}\]])", "", raw))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        fail(f"cannot read predecessor {label}: {path}: {error}")
+    if not isinstance(value, dict):
+        fail(f"predecessor {label} is not an object: {path}")
+    return value
+
+
+def casefold_child(parent: Path, name: str, label: str) -> Path | None:
+    if parent.is_symlink() or not parent.is_dir():
+        return None
+    matches = [item for item in parent.iterdir() if item.name.casefold() == name.casefold()]
+    if len(matches) > 1:
+        fail(f"predecessor {label} case-collides under {parent}")
+    if not matches:
+        return None
+    result = matches[0]
+    if result.is_symlink() or not result.is_dir():
+        fail(f"predecessor {label} is not a real directory: {result}")
+    return result
+
+
+def installed_marker_paths(root: Path, sdk_band: str, workload_id: str) -> list[str]:
+    """Return the actual direct-workload markers in every supported scope."""
+
+    metadata = require_safe_path(root, Path("metadata/workloads"), "workload metadata")
+    if not os.path.lexists(metadata):
+        return []
+    if metadata.is_symlink() or not metadata.is_dir():
+        fail(f"workload metadata is not a real directory: {metadata}")
+    matches: list[str] = []
+    for directory, child_dirs, files in os.walk(metadata, topdown=True, followlinks=False):
+        current = Path(directory)
+        unsafe = [name for name in [*child_dirs, *files] if (current / name).is_symlink()]
+        if unsafe:
+            fail(f"workload metadata contains a symlink: {current / unsafe[0]}")
+        if current.name.casefold() != "installedworkloads":
+            continue
+        relative = current.relative_to(metadata)
+        scope = relative.parts[:-1]
+        if scope.count(sdk_band) != 1:
+            continue
+        for name in files:
+            if name.casefold() != workload_id.casefold():
+                continue
+            marker = current / name
+            if not marker.is_file():
+                fail(f"workload marker is not a regular file: {marker}")
+            matches.append(marker.relative_to(root).as_posix())
+    if len(matches) > 1:
+        fail(
+            f"direct workload {workload_id} has multiple markers for SDK feature band {sdk_band}: "
+            + ", ".join(sorted(matches))
+        )
+    return matches
+
+
+def observed_manifest_registration(root: Path, descriptor: dict, sdk_band: str) -> tuple[str, str]:
+    """Locate the one installed manifest identity backing an existing marker."""
+
+    registry_root = require_safe_path(
+        root, Path("metadata/workloads/InstalledManifests/v1"), "installed manifest registry"
+    )
+    registry = casefold_child(registry_root, descriptor["manifestId"], "manifest registry")
+    if registry is None:
+        fail(f"existing {descriptor['workloadId']} marker lacks an installed manifest registration")
+    records: list[tuple[str, str]] = []
+    for version in registry.iterdir():
+        if version.is_symlink() or not version.is_dir():
+            fail(f"installed manifest version is unsafe: {version}")
+        for manifest_band in version.iterdir():
+            if manifest_band.is_symlink() or not manifest_band.is_dir():
+                fail(f"installed manifest feature band is unsafe: {manifest_band}")
+            leaf = manifest_band / sdk_band
+            if not os.path.lexists(leaf):
+                continue
+            if leaf.is_symlink() or not leaf.is_file():
+                fail(f"installed manifest registration is unsafe: {leaf}")
+            records.append((version.name, manifest_band.name))
+    if len(records) != 1:
+        detail = "none" if not records else ", ".join(f"{version}/{band}" for version, band in records)
+        fail(
+            f"existing {descriptor['workloadId']} marker does not have one manifest identity "
+            f"for SDK feature band {sdk_band}: {detail}"
+        )
+    return records[0]
+
+
+def discover_predecessor_workloads(
+    root: Path, sdk_band: str, workloads: list[dict], *, require_exact: bool
+) -> list[dict]:
+    """Bind marker presence to the manifest actually registered before mutation."""
+
+    result: list[dict] = []
+    for descriptor in workloads:
+        markers = installed_marker_paths(root, sdk_band, descriptor["workloadId"])
+        if not markers:
+            if require_exact:
+                fail(
+                    f"requested --keep-existing workload is not registered for the selected SDK feature band: "
+                    f"{descriptor['workloadId']}"
+                )
+            continue
+        version, manifest_band = observed_manifest_registration(root, descriptor, sdk_band)
+        actual = {
+            **descriptor,
+            "manifestVersion": version,
+            "manifestFeatureBand": manifest_band,
+            "markerPath": markers[0],
+        }
+        if require_exact and (
+            version != descriptor["manifestVersion"]
+            or manifest_band != descriptor["manifestFeatureBand"]
+        ):
+            fail(
+                f"--keep-existing {descriptor['workloadId']} is not the exact locked manifest identity; "
+                "refusing to reconcile an external registration"
+            )
+        manifest_band_root = require_safe_path(
+            root,
+            Path("sdk-manifests") / manifest_band,
+            "installed workload manifest",
+        )
+        manifest_package = casefold_child(
+            manifest_band_root, descriptor["manifestId"], "installed manifest package"
+        )
+        manifest_root = (
+            casefold_child(manifest_package, version, "installed manifest version")
+            if manifest_package is not None
+            else None
+        )
+        if manifest_root is None:
+            fail(f"existing {descriptor['workloadId']} has no matching extracted manifest")
+        manifest = manifest_root / "WorkloadManifest.json"
+        if manifest.is_symlink() or not manifest.is_file():
+            fail(f"existing {descriptor['workloadId']} has no safe matching manifest: {manifest}")
+        value = relaxed_json_file(manifest, "installed workload manifest")
+        definitions = value.get("workloads")
+        if not isinstance(definitions, dict) or not any(
+            isinstance(name, str) and name.casefold() == descriptor["workloadId"].casefold()
+            for name in definitions
+        ):
+            fail(f"existing {descriptor['workloadId']} manifest lacks its direct workload definition")
+        result.append(actual)
+    return result
+
+
+def predecessor_package_ids(root: Path, context: dict) -> set[str]:
+    """Discover the actual pre-migration package closure for replaced roots.
+
+    The CLI reconciles old workload graphs globally.  Capturing the pre-existing
+    direct/extends closure lets recovery restore only Apple predecessor payloads
+    rather than replacing the complete live .NET root.
+    """
+
+    result: set[str] = set()
+    for descriptor in [
+        *context.get("predecessorWorkloads", []),
+        *context.get("protectedWorkloads", []),
+    ]:
+        band = require_safe_path(
+            root,
+            Path("sdk-manifests") / descriptor["manifestFeatureBand"],
+            "predecessor manifest",
+        )
+        package = casefold_child(band, descriptor["manifestId"], "manifest package")
+        version = casefold_child(package, descriptor["manifestVersion"], "manifest version") if package else None
+        manifest = version / "WorkloadManifest.json" if version else Path("/dev/null")
+        if not manifest.is_file() or manifest.is_symlink():
+            continue
+        value = relaxed_json_file(manifest, "workload manifest")
+        workloads = value.get("workloads")
+        packs = value.get("packs")
+        if not isinstance(workloads, dict) or not isinstance(packs, dict):
+            fail(f"predecessor workload manifest lacks workload or pack maps: {manifest}")
+        definitions: dict[str, tuple[dict, dict]] = {}
+        for name, definition in workloads.items():
+            if isinstance(name, str) and isinstance(definition, dict):
+                definitions[name.casefold()] = (definition, packs)
+
+        def resolve_definition(workload_id: str) -> list[tuple[dict, dict]]:
+            direct = definitions.get(workload_id.casefold())
+            if direct is not None:
+                return [direct]
+            band_root = require_safe_path(
+                root,
+                Path("sdk-manifests") / descriptor["manifestFeatureBand"],
+                "extended predecessor manifest",
+            )
+            matches: list[tuple[dict, dict]] = []
+            if not band_root.is_dir() or band_root.is_symlink():
+                return []
+            for package in band_root.iterdir():
+                if package.is_symlink() or not package.is_dir():
+                    continue
+                for package_version in package.iterdir():
+                    candidate = package_version / "WorkloadManifest.json"
+                    if package_version.is_symlink() or not candidate.is_file() or candidate.is_symlink():
+                        continue
+                    candidate_value = relaxed_json_file(candidate, "extended workload manifest")
+                    candidate_workloads = candidate_value.get("workloads")
+                    candidate_packs = candidate_value.get("packs")
+                    if not isinstance(candidate_workloads, dict) or not isinstance(candidate_packs, dict):
+                        continue
+                    for name, definition in candidate_workloads.items():
+                        if isinstance(name, str) and name.casefold() == workload_id.casefold() and isinstance(definition, dict):
+                            matches.append((definition, candidate_packs))
+            # Workload-set manifests may deliberately repeat abstract runtime
+            # definitions across compatibility packages.  Snapshot their union;
+            # it is conservative and avoids choosing one order-dependent graph.
+            return matches
+
+        visited: set[str] = set()
+
+        def visit(workload_id: str) -> None:
+            key = workload_id.casefold()
+            if key in visited:
+                return
+            visited.add(key)
+            resolved = resolve_definition(workload_id)
+            if not resolved:
+                fail(f"predecessor manifest lacks workload {workload_id!r}: {manifest}")
+            for definition, definition_packs in resolved:
+                direct = definition.get("packs", [])
+                extends = definition.get("extends", [])
+                if not isinstance(direct, list) or not all(isinstance(item, str) for item in direct):
+                    fail(f"predecessor workload packs are invalid: {workload_id!r}")
+                if not isinstance(extends, list) or not all(isinstance(item, str) for item in extends):
+                    fail(f"predecessor workload extends are invalid: {workload_id!r}")
+                for pack_id in direct:
+                    result.add(pack_id)
+                    pack = definition_packs.get(pack_id)
+                    if isinstance(pack, dict):
+                        aliases = pack.get("alias-to", {})
+                        if isinstance(aliases, dict):
+                            for alias in aliases.values():
+                                if isinstance(alias, str):
+                                    result.add(alias)
+                for extended in extends:
+                    visit(extended)
+
+        visit(descriptor["workloadId"])
+    return result
+
+
+def predecessor_units(root: Path, context: dict, units: dict[str, str]) -> dict[str, str]:
+    package_ids = {item.casefold() for item in predecessor_package_ids(root, context)}
+    result: dict[str, str] = {}
+    for raw, value in units.items():
+        parts = PurePosixPath(raw).parts
+        package_id: str | None = None
+        if len(parts) >= 3 and parts[0] == "packs":
+            package_id = parts[1]
+        elif len(parts) == 2 and parts[0] in {"template-packs", "library-packs"}:
+            lowered = parts[1].casefold()
+            if any(lowered.startswith(f"{item}.") for item in package_ids):
+                result[raw] = value
+                continue
+        if package_id is not None and package_id.casefold() in package_ids:
+            result[raw] = value
+    return result
+
+
+def predecessor_installed_pack_leaf(
+    raw: str, package_ids: set[str], sdk_feature_band: str
+) -> str | None:
+    """Map a captured predecessor unit to the matching InstalledPacks record."""
+
+    parts = PurePosixPath(raw).parts
+    if len(parts) >= 3 and parts[0] == "packs":
+        return f"InstalledPacks/v1/{parts[1]}/{parts[2]}/{sdk_feature_band}"
+    if len(parts) != 2 or parts[0] not in {"template-packs", "library-packs"}:
+        return None
+    filename = parts[1]
+    lowered = filename.casefold()
+    suffix = ".nupkg"
+    if not lowered.endswith(suffix):
+        return None
+    for package_id in sorted(package_ids, key=lambda item: len(item), reverse=True):
+        prefix = package_id.casefold() + "."
+        if not lowered.startswith(prefix):
+            continue
+        version = filename[len(package_id) + 1 : -len(suffix)]
+        if version:
+            return f"InstalledPacks/v1/{package_id}/{version}/{sdk_feature_band}"
+    return None
+
+
+def copy_predecessor_units(root: Path, destination: Path, units: dict[str, str]) -> None:
+    for raw, expected in units.items():
+        source = require_safe_path(root, safe_relative(raw, UNIT_ROOTS), "predecessor workload unit")
+        target = destination / safe_relative(raw, UNIT_ROOTS)
+        if source.is_symlink() or not os.path.lexists(source):
+            fail(f"predecessor workload unit is unsafe or missing: {source}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            shutil.copytree(source, target, symlinks=True)
+        elif source.is_file():
+            shutil.copy2(source, target, follow_symlinks=False)
+        else:
+            fail(f"predecessor workload unit has unsupported type: {source}")
+        if tree_hash(target) != expected:
+            fail(f"predecessor workload snapshot did not verify: {source}")
 
 
 def copy_snapshot(source: Path, destination: Path) -> None:
@@ -257,9 +625,7 @@ def unit_is_expected(raw: str, expected_packages: list[dict[str, str]]) -> bool:
     }
 
 
-def manifest_package_id(
-    expected_packages: list[dict[str, str]], manifest_feature_band: str
-) -> str:
+def manifest_package_id(expected_packages: list[dict[str, str]], manifest_feature_band: str) -> str:
     raw_suffix = f".Manifest-{manifest_feature_band}"
     suffix = raw_suffix.casefold()
     matches = [
@@ -274,19 +640,80 @@ def manifest_package_id(
     fail("expected package inventory contains multiple workload manifest packages")
 
 
+def manifest_snapshot_label(context: dict, feature_band: str) -> str:
+    labels = expected_snapshot_paths({"context": context, "snapshots": {}})
+    matches = [label for label, path in labels.items() if path == Path("sdk-manifests") / feature_band]
+    if len(matches) != 1:
+        fail(f"transaction cannot locate the {feature_band} manifest snapshot")
+    return matches[0]
+
+
 def make_ownership_plan(context: dict, expected_packages: list[dict[str, str]]) -> dict:
     sdk_band = context["sdkFeatureBand"]
     workload_version = context["workloadVersion"]
     workload_set_band = context["workloadSetFeatureBand"]
-    manifest_version = context["manifestVersion"]
-    manifest_band = context["manifestFeatureBand"]
-    manifest_id = context["manifestId"]
-    workload_id = context["workloadId"]
-    metadata_leaves = [
-        f"{sdk_band}/InstalledWorkloads/{workload_id}",
-        f"InstalledWorkloadSets/v1/{workload_version}/{workload_set_band}/{sdk_band}",
-        f"InstalledManifests/v1/{manifest_id}/{manifest_version}/{manifest_band}/{sdk_band}",
-    ]
+    workloads = context["workloads"]
+    metadata_leaves = [f"InstalledWorkloadSets/v1/{workload_version}/{workload_set_band}/{sdk_band}"]
+    tree_prefixes: dict[str, list[str]] = {}
+    protected_tree_prefixes: dict[str, list[str]] = {}
+    protected_metadata_leaves: list[str] = []
+    predecessor_by_workload = {
+        item["workloadId"].casefold(): item
+        for item in context.get("predecessorWorkloads", [])
+    }
+
+    def add_manifest_tree(
+        destination: dict[str, list[str]], descriptor: dict[str, str]
+    ) -> None:
+        destination.setdefault(
+            manifest_snapshot_label(context, descriptor["manifestFeatureBand"]), []
+        ).append(f"{descriptor['manifestId']}/{descriptor['manifestVersion']}")
+
+    def manifest_leaf(descriptor: dict[str, str]) -> str:
+        return (
+            f"InstalledManifests/v1/{descriptor['manifestId']}/{descriptor['manifestVersion']}/"
+            f"{descriptor['manifestFeatureBand']}/{sdk_band}"
+        )
+
+    def marker_leaf(descriptor: dict[str, str]) -> str:
+        marker_path = descriptor.get("markerPath")
+        if marker_path is None:
+            return f"{sdk_band}/InstalledWorkloads/{descriptor['workloadId']}"
+        if not isinstance(marker_path, str):
+            fail("workload marker path is invalid")
+        marker = safe_relative(marker_path)
+        if marker.parts[:2] != ("metadata", "workloads"):
+            fail("workload marker is outside workload metadata")
+        return marker.relative_to(Path("metadata/workloads")).as_posix()
+
+    for workload in workloads:
+        workload_id = workload["workloadId"]
+        manifest_id = workload["manifestId"]
+        manifest_version = workload["manifestVersion"]
+        manifest_band = workload["manifestFeatureBand"]
+        metadata_leaves.extend(
+            [
+                f"{sdk_band}/InstalledWorkloads/{workload_id}",
+                manifest_leaf(workload),
+            ]
+        )
+        add_manifest_tree(tree_prefixes, workload)
+        predecessor = predecessor_by_workload.get(workload_id.casefold())
+        if predecessor is not None:
+            metadata_leaves.extend([marker_leaf(predecessor), manifest_leaf(predecessor)])
+            add_manifest_tree(tree_prefixes, predecessor)
+    for workload in context.get("protectedWorkloads", []):
+        workload_id = workload["workloadId"]
+        manifest_id = workload["manifestId"]
+        manifest_version = workload["manifestVersion"]
+        manifest_band = workload["manifestFeatureBand"]
+        protected_metadata_leaves.extend(
+            [
+                marker_leaf(workload),
+                manifest_leaf(workload),
+            ]
+        )
+        add_manifest_tree(protected_tree_prefixes, workload)
     for item in expected_packages:
         package_id = item["id"]
         if ".manifest-" in package_id.casefold() or package_id.casefold().startswith(
@@ -296,16 +723,15 @@ def make_ownership_plan(context: dict, expected_packages: list[dict[str, str]]) 
         metadata_leaves.append(
             f"InstalledPacks/v1/{package_id}/{item['version']}/{sdk_band}"
         )
-    tree_prefixes = {"manifestBand": [f"{manifest_id}/{manifest_version}"]}
-    workload_set_label = (
-        "manifestBand" if manifest_band == workload_set_band else "workloadSetBand"
-    )
+    workload_set_label = manifest_snapshot_label(context, workload_set_band)
     tree_prefixes.setdefault(workload_set_label, []).append(
         f"workloadsets/{workload_version}"
     )
     return {
         "treePrefixes": tree_prefixes,
         "leafPaths": {"workloadMetadata": sorted(set(metadata_leaves))},
+        "protectedTreePrefixes": protected_tree_prefixes,
+        "protectedLeafPaths": {"workloadMetadata": sorted(set(protected_metadata_leaves))},
         "sharedJson": {
             "snapshot": "workloadMetadata",
             "path": f"X64/{sdk_band}/globaljsonworkloadsets.json",
@@ -315,6 +741,33 @@ def make_ownership_plan(context: dict, expected_packages: list[dict[str, str]]) 
     }
 
 
+def normalise_workloads(
+    raw_workloads: list[dict[str, str]], expected_packages: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in raw_workloads:
+        workload_id = validate_component(raw.get("workloadId"), "workload ID")
+        folded = workload_id.casefold()
+        if folded in seen:
+            fail(f"duplicate managed workload ID: {workload_id}")
+        seen.add(folded)
+        manifest_id = validate_component(raw.get("manifestId"), "manifest package ID")
+        manifest_version = validate_component(raw.get("manifestVersion"), "manifest version")
+        manifest_band = validate_component(raw.get("manifestFeatureBand"), "manifest feature band")
+        result.append(
+            {
+                "workloadId": workload_id,
+                "manifestId": manifest_id,
+                "manifestVersion": manifest_version,
+                "manifestFeatureBand": manifest_band,
+            }
+        )
+    if not result:
+        fail("transaction requires at least one managed workload")
+    return sorted(result, key=lambda item: item["workloadId"].casefold())
+
+
 def begin(
     root: Path,
     transaction: Path,
@@ -322,8 +775,8 @@ def begin(
     *,
     sdk_feature_band: str,
     workload_version: str,
-    workload_manifest: str,
-    workload_id: str,
+    workloads: list[dict[str, str]],
+    protected_workloads: list[dict[str, str]] | None = None,
     control_global_json: str,
 ) -> None:
     cleanup_finalized_transaction(transaction)
@@ -338,18 +791,30 @@ def begin(
         else:
             fail(f"a committed workload transaction already exists: {transaction}")
     expected = validated_expected_packages(expected_packages)
-    try:
-        manifest_version, manifest_band = workload_manifest.split("/", 1)
-    except ValueError:
-        fail("workload manifest identity must be VERSION/FEATURE-BAND")
+    managed_workloads = normalise_workloads(workloads, expected)
+    protected = normalise_workloads(protected_workloads or [], expected) if protected_workloads else []
+    overlap = {item["workloadId"].casefold() for item in managed_workloads} & {
+        item["workloadId"].casefold() for item in protected
+    }
+    if overlap:
+        fail("managed and protected workload IDs overlap: " + ", ".join(sorted(overlap)))
+    validated_sdk_band = validate_component(sdk_feature_band, "SDK feature band")
+    # Discover registrations at the transaction boundary, not during early
+    # installer planning. Managed workloads may replace an older manifest; kept
+    # workloads must still be exactly lock-compatible at this point.
+    predecessor_workloads = discover_predecessor_workloads(
+        root, validated_sdk_band, managed_workloads, require_exact=False
+    )
+    protected = discover_predecessor_workloads(
+        root, validated_sdk_band, protected, require_exact=True
+    )
     context = {
-        "sdkFeatureBand": validate_component(sdk_feature_band, "SDK feature band"),
+        "sdkFeatureBand": validated_sdk_band,
         "workloadVersion": validate_component(workload_version, "workload version"),
         "workloadSetFeatureBand": feature_band(workload_version),
-        "manifestVersion": validate_component(manifest_version, "manifest version"),
-        "manifestFeatureBand": validate_component(manifest_band, "manifest feature band"),
-        "manifestId": manifest_package_id(expected, manifest_band),
-        "workloadId": validate_component(workload_id, "workload ID"),
+        "workloads": managed_workloads,
+        "protectedWorkloads": protected,
+        "predecessorWorkloads": predecessor_workloads,
         "controlGlobalJson": control_global_json,
     }
     if not Path(control_global_json).is_absolute() or "\0" in control_global_json:
@@ -363,24 +828,68 @@ def begin(
         before.mkdir()
         snapshot_state: dict[str, dict] = {}
         for label, relative in snapshots.items():
-            source = root / relative
+            source = require_safe_path(root, relative, "workload state")
             snapshot_state[label] = {"path": relative.as_posix(), "existed": source.exists()}
             if source.exists():
                 if source.is_symlink() or not source.is_dir():
                     fail(f"workload state path is not a real directory: {source}")
                 copy_snapshot(source, before / label)
+        before_units = current_units(root)
+        predecessor = predecessor_units(root, context, before_units)
+        protected_predecessor = predecessor_units(
+            root,
+            {
+                **context,
+                "workloads": [],
+                "predecessorWorkloads": [],
+                "protectedWorkloads": context.get("protectedWorkloads", []),
+            },
+            before_units,
+        )
+        predecessor_root = stage / "before-units"
+        predecessor_root.mkdir()
+        copy_predecessor_units(root, predecessor_root, predecessor)
+        # Older official graphs can contain target packs that the derivative no
+        # longer selects (for example iOS simulator/net9 packs).  The CLI may
+        # remove their installation records during reconciliation; authorize
+        # only those records whose payload is in the durable predecessor set.
+        predecessor_leaves = plan["leafPaths"]["workloadMetadata"]
+        protected_leaves = plan["protectedLeafPaths"]["workloadMetadata"]
+        predecessor_ids = predecessor_package_ids(root, context)
+        protected_ids = predecessor_package_ids(
+            root,
+            {
+                **context,
+                "workloads": [],
+                "predecessorWorkloads": [],
+                "protectedWorkloads": context.get("protectedWorkloads", []),
+            },
+        )
+        for raw in predecessor:
+            leaf = predecessor_installed_pack_leaf(
+                raw,
+                protected_ids if raw in protected_predecessor else predecessor_ids,
+                context["sdkFeatureBand"],
+            )
+            if leaf is not None:
+                (protected_leaves if raw in protected_predecessor else predecessor_leaves).append(leaf)
+        plan["leafPaths"]["workloadMetadata"] = sorted(set(predecessor_leaves))
+        plan["protectedLeafPaths"]["workloadMetadata"] = sorted(set(protected_leaves))
         state = {
             "schemaVersion": SCHEMA_VERSION,
             "owner": OWNER,
             "status": "prepared",
             "dotnetRoot": str(root),
             "snapshots": snapshot_state,
-            "beforeUnits": current_units(root),
+            "beforeUnits": before_units,
+            "predecessorUnits": predecessor,
+            "protectedPredecessorUnits": protected_predecessor,
             "expectedPackages": expected,
             "context": context,
             "ownershipPlan": plan,
         }
         fsync_tree(before)
+        fsync_tree(predecessor_root)
         write_state(stage, state)
         try:
             publish_directory_noreplace(stage, transaction)
@@ -418,6 +927,35 @@ def path_is_owned(state: dict, label: str, raw: str) -> bool:
     )
 
 
+def path_is_protected(state: dict, label: str, raw: str) -> bool:
+    plan = state.get("ownershipPlan", {})
+    return path_relation_allowed(
+        raw, plan.get("protectedTreePrefixes", {}).get(label, []), allow_descendants=True
+    ) or path_relation_allowed(
+        raw, plan.get("protectedLeafPaths", {}).get(label, []), allow_descendants=False
+    )
+
+
+def path_is_cli_reconciliation_metadata(label: str, raw: str) -> bool:
+    """Allow the CLI's documented global record refresh, never foreign payloads.
+
+    Workload install rewrites installation records for Android/MAUI/Wasm and two
+    Mono toolchain manifests while reconciling a workload set.  Their workload
+    markers and pack bytes remain protected by the broader snapshot/unit checks.
+    These deltas are journaled for diagnosis but deliberately are not replayed:
+    replaying a global record could overwrite a later foreign CLI operation.
+    """
+
+    folded = raw.casefold()
+    if label == "workloadMetadata":
+        return folded.startswith("installedpacks/v1/") or folded.endswith(
+            "/installstate/globaljsonworkloadsets.json"
+        )
+    return label.startswith("manifestBand") and folded.startswith(
+        "microsoft.net.workload.mono.toolchain."
+    )
+
+
 def json_mapping(path: Path) -> dict[str, str]:
     if not os.path.lexists(path):
         return {}
@@ -438,7 +976,11 @@ def json_mapping(path: Path) -> dict[str, str]:
 def live_shared_consumers(root: Path, state: dict) -> list[str]:
     shared = state["ownershipPlan"]["sharedJson"]
     snapshot = state["snapshots"][shared["snapshot"]]
-    path = root / safe_relative(snapshot["path"]) / safe_relative(shared["path"])
+    path = require_safe_path(
+        root,
+        safe_relative(snapshot["path"]) / safe_relative(shared["path"]),
+        "shared workload metadata",
+    )
     return sorted(
         candidate
         for candidate, version in json_mapping(path).items()
@@ -449,7 +991,11 @@ def live_shared_consumers(root: Path, state: dict) -> list[str]:
 def acquire_shared_metadata_lock(root: Path, state: dict) -> tuple[int, Path, bool]:
     shared = state["ownershipPlan"]["sharedJson"]
     snapshot = state["snapshots"][shared["snapshot"]]
-    path = root / safe_relative(snapshot["path"]) / safe_relative(shared["path"])
+    path = require_safe_path(
+        root,
+        safe_relative(snapshot["path"]) / safe_relative(shared["path"]),
+        "shared workload metadata",
+    )
     mkdir_durable(path.parent, mode=0o700)
     created = not os.path.lexists(path)
     flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
@@ -503,15 +1049,28 @@ def snapshot_changes(
     shared = state["ownershipPlan"]["sharedJson"]
     for label, relative, details in snapshot_items(state):
         before = inventory(transaction / "before" / label) if details["existed"] else {}
-        after = inventory(root / relative, ignore_history=True)
+        after = inventory(require_safe_path(root, relative, "workload state"), ignore_history=True)
         changed: dict[str, dict] = {}
         for path in sorted(before.keys() | after.keys()):
             if before.get(path) == after.get(path):
                 continue
             if label == shared["snapshot"] and path.casefold() == shared["path"].casefold():
                 continue
-            if path_is_owned(state, label, path):
-                changed[path] = {"before": before.get(path), "after": after.get(path)}
+            owned = path_is_owned(state, label, path)
+            protected = path_is_protected(state, label, path)
+            reconciliation = path_is_cli_reconciliation_metadata(label, path) and (
+                not owned or protected
+            )
+            if owned or protected or reconciliation:
+                changed[path] = {
+                    "before": before.get(path),
+                    "after": after.get(path),
+                    "protected": protected,
+                    # Foreign records and protected pack records are never
+                    # project-owned. Keep a durable audit trail, but do not
+                    # overwrite a later CLI reconciliation during rollback.
+                    "reconciliation": reconciliation,
+                }
             else:
                 unexpected.append(f"{relative.as_posix()}/{path}")
         changes[label] = {"rootCreated": not details["existed"] and (root / relative).is_dir(), "entries": changed}
@@ -519,7 +1078,7 @@ def snapshot_changes(
     shared_relative = Path(state["snapshots"][shared_label]["path"]) / safe_relative(shared["path"])
     before_shared = transaction / "before" / shared_label / safe_relative(shared["path"])
     before_map = json_mapping(before_shared)
-    after_map = json_mapping(root / shared_relative)
+    after_map = json_mapping(require_safe_path(root, shared_relative, "shared workload metadata"))
     key = shared["key"]
     shared_consumers = live_shared_consumers(root, state)
     for changed_key in sorted(before_map.keys() | after_map.keys()):
@@ -551,11 +1110,11 @@ def snapshot_changes(
 
 def fsync_committed_payload(root: Path, state: dict, created_units: dict[str, str]) -> None:
     for _label, relative, _details in snapshot_items(state):
-        path = root / relative
+        path = require_safe_path(root, relative, "committed workload state")
         if path.is_dir() and not path.is_symlink():
             fsync_tree(path)
-    for raw in created_units:
-        path = root / safe_relative(raw, UNIT_ROOTS)
+    for raw in set(created_units) | set(state.get("predecessorUnitChanges", {})):
+        path = require_safe_path(root, safe_relative(raw, UNIT_ROOTS), "committed workload pack")
         if path.is_dir() and not path.is_symlink():
             fsync_tree(path)
         elif path.is_file() and not path.is_symlink():
@@ -572,8 +1131,20 @@ def commit(root: Path, transaction: Path) -> None:
         after_units = current_units(root)
         before_units = state["beforeUnits"]
         changed = sorted(path for path in before_units if after_units.get(path) != before_units[path])
-        if changed:
-            fail("workload CLI modified pre-existing pack payloads: " + ", ".join(changed))
+        predecessor = state.get("predecessorUnits", {})
+        unprotected = sorted(path for path in changed if path not in predecessor)
+        if unprotected:
+            fail(
+                "workload CLI modified pre-existing pack payloads outside the durable predecessor scope: "
+                + ", ".join(unprotected)
+            )
+        state["predecessorUnitChanges"] = {
+            path: {"before": before_units[path], "after": after_units.get(path)}
+            for path in changed
+        }
+        protected_predecessor_changes = sorted(
+            path for path in changed if path in state.get("protectedPredecessorUnits", {})
+        )
         state["createdUnits"] = {
             path: value for path, value in after_units.items() if path not in before_units
         }
@@ -591,6 +1162,17 @@ def commit(root: Path, transaction: Path) -> None:
             fail(
                 "concurrent workload metadata changes are outside this installation: "
                 + ", ".join(unexpected)
+            )
+        protected_metadata_changes = sorted(
+            f"{label}/{raw}"
+            for label, change_set in changes.items()
+            for raw, change in change_set["entries"].items()
+            if change.get("protected") and not change.get("reconciliation")
+        )
+        if protected_predecessor_changes or protected_metadata_changes:
+            fail(
+                "workload CLI changed a --keep-existing registration: "
+                + ", ".join([*protected_predecessor_changes, *protected_metadata_changes])
             )
         state["snapshotChanges"] = changes
         state["sharedJsonPatches"] = patches
@@ -611,21 +1193,34 @@ def verify(root: Path, transaction: Path) -> None:
     if state.get("status") != "committed":
         fail("workload transaction is not committed")
     for label, relative, _details in snapshot_items(state):
+        require_safe_path(root, relative, "verified workload state")
         changes = state.get("snapshotChanges", {}).get(label, {}).get("entries", {})
         for raw, change in changes.items():
-            path = root / relative / safe_relative(raw)
+            if change.get("reconciliation"):
+                continue
+            path = require_safe_path(root, relative / safe_relative(raw), "verified workload state")
             if signature(path) != change.get("after"):
                 fail(f"installed workload state changed since setup: {path}")
     for raw, expected in state.get("createdUnits", {}).items():
-        path = root / safe_relative(raw, UNIT_ROOTS)
+        path = require_safe_path(root, safe_relative(raw, UNIT_ROOTS), "verified workload pack")
         if tree_hash(path) != expected:
             fail(f"installed workload pack changed since setup: {path}")
+    for raw, change in state.get("predecessorUnitChanges", {}).items():
+        path = require_safe_path(root, safe_relative(raw, UNIT_ROOTS), "verified predecessor pack")
+        if tree_hash(path) != change.get("after"):
+            fail(f"replaced predecessor workload pack changed since setup: {path}")
     for patch in state.get("sharedJsonPatches", []):
         snapshot = state["snapshots"].get(patch.get("snapshot"), {})
         relative = snapshot.get("path")
         if not isinstance(relative, str):
             fail("workload transaction contains an invalid shared metadata patch")
-        mapping = json_mapping(root / safe_relative(relative) / safe_relative(patch["path"]))
+        mapping = json_mapping(
+            require_safe_path(
+                root,
+                safe_relative(relative) / safe_relative(patch["path"]),
+                "verified shared workload metadata",
+            )
+        )
         if mapping.get(patch["key"]) != patch.get("after"):
             fail("installed workload shared metadata changed since setup")
     print("workload_transaction=ok")
@@ -635,6 +1230,8 @@ def validate_snapshots(transaction: Path, state: dict, changes: dict[str, dict])
     conflicts: list[str] = []
     for label, _relative, _details in snapshot_items(state):
         for raw, change in changes[label]["entries"].items():
+            if change.get("reconciliation"):
+                continue
             before = change.get("before")
             if before is None or before.get("kind") == "directory":
                 continue
@@ -661,6 +1258,11 @@ def build_restore_ops(
     protect_shared_resources: bool = False,
 ) -> list[dict]:
     operations: list[dict] = []
+    # A predecessor existed before our transaction.  It is never a shared
+    # project-owned resource: restore its bytes even if another control
+    # global.json later selects the same workload set.
+    for raw, change in sorted(state.get("predecessorUnitChanges", {}).items()):
+        operations.append({"kind": "restore-predecessor-unit", "path": raw, **change})
     if remove_units and not protect_shared_resources:
         for raw, expected in sorted(
             units.items(), key=lambda item: (item[0].count("/"), item[0]), reverse=True
@@ -672,9 +1274,17 @@ def build_restore_ops(
     nodes: list[tuple[str, str, dict]] = []
     for label, _relative, _details in snapshot_items(state):
         for raw, change in changes[label]["entries"].items():
-            if protect_shared_resources:
+            # Global CLI reconciliation records are intentionally diagnostic
+            # only. They can be shared with unrelated workload operations, so
+            # restoring them would replay foreign state.
+            if change.get("reconciliation"):
                 continue
             before = change.get("before")
+            # Only project-created state can be retained for a late shared
+            # workload-set consumer.  Predecessor payload/metadata was present
+            # before this transaction and must always be restored.
+            if protect_shared_resources and before is None:
+                continue
             item = (label, raw, change)
             if before is None:
                 removed.append(item)
@@ -751,12 +1361,56 @@ def remove_for_restore(
     durable_remove(target, tombstone)
 
 
+def safe_restore_target(root: Path, target: Path) -> Path:
+    try:
+        relative = target.relative_to(root)
+    except ValueError:
+        fail(f"restore target escapes the .NET root: {target}")
+    return require_safe_path(root, relative, "restore target")
+
+
 def execute_restore_op(
     root: Path, transaction: Path, state: dict, operation: dict, index: int
 ) -> None:
     kind = operation.get("kind")
+    if kind == "restore-predecessor-unit":
+        raw = operation.get("path")
+        if not isinstance(raw, str):
+            fail("predecessor restore operation lacks a path")
+        target = safe_restore_target(root, root / safe_relative(raw, UNIT_ROOTS))
+        before_hash = operation.get("before")
+        after_hash = operation.get("after")
+        if not isinstance(before_hash, str) or (after_hash is not None and not isinstance(after_hash, str)):
+            fail("predecessor restore operation has invalid hashes")
+        current_hash = tree_hash(target)
+        if current_hash == before_hash:
+            fsync_path_state(target)
+            return
+        if current_hash != after_hash:
+            fail(f"replaced predecessor workload pack changed; refusing to restore: {target}")
+        source = transaction / "before-units" / safe_relative(raw, UNIT_ROOTS)
+        if tree_hash(source) != before_hash:
+            fail(f"predecessor workload snapshot changed; refusing to restore: {source}")
+        tombstone = restore_tombstone(transaction, target, index)
+        remove_for_restore(target, tombstone, expected_hash=after_hash)
+        mkdir_durable(target.parent, mode=0o700)
+        temporary = target.with_name(tombstone.name + ".tmp")
+        if source.is_dir() and not source.is_symlink():
+            if os.path.lexists(temporary):
+                durable_remove(temporary, temporary.with_name(temporary.name + ".old"))
+            shutil.copytree(source, temporary, symlinks=True)
+            fsync_tree(temporary)
+            os.replace(temporary, target)
+            fsync_directory(target.parent)
+        elif source.is_file() and not source.is_symlink():
+            durable_write_bytes(target, source.read_bytes(), stat.S_IMODE(source.stat().st_mode), temporary)
+        else:
+            fail(f"predecessor workload snapshot has an unsupported type: {source}")
+        if tree_hash(target) != before_hash:
+            fail(f"predecessor workload restore did not verify: {target}")
+        return
     if kind == "remove-unit":
-        target = root / safe_relative(operation["path"], UNIT_ROOTS)
+        target = safe_restore_target(root, root / safe_relative(operation["path"], UNIT_ROOTS))
         remove_for_restore(
             target,
             restore_tombstone(transaction, target, index),
@@ -775,7 +1429,7 @@ def execute_restore_op(
                 break
         return
     if kind == "remove-empty-root":
-        target = root / safe_relative(operation["path"])
+        target = safe_restore_target(root, root / safe_relative(operation["path"]))
         try:
             target.rmdir()
             fsync_directory(target.parent)
@@ -789,7 +1443,9 @@ def execute_restore_op(
     details = state["snapshots"].get(snapshot)
     if not isinstance(details, dict):
         fail("restore operation references an unknown snapshot")
-    target = root / safe_relative(details["path"]) / safe_relative(operation["path"])
+    target = safe_restore_target(
+        root, root / safe_relative(details["path"]) / safe_relative(operation["path"])
+    )
     tombstone = restore_tombstone(transaction, target, index)
     if kind == "restore-json-key":
         mapping = json_mapping(target)
@@ -958,7 +1614,13 @@ def restore(
                     operation
                     for operation in operations[index:]
                     if isinstance(operation, dict)
-                    and operation.get("kind") == "restore-json-key"
+                    and (
+                        operation.get("kind") in {"restore-json-key", "restore-predecessor-unit"}
+                        or (
+                            operation.get("kind") == "restore-entry"
+                            and operation.get("before") is not None
+                        )
+                    )
                 ]
                 state["preservedSharedWorkloadSetConsumers"] = shared_consumers
                 state["preservedSharedResources"] = True
@@ -977,6 +1639,13 @@ def restore(
                 )
                 units = {
                     path: value for path, value in units.items() if path not in preserved_units
+                }
+            if "predecessorUnitChanges" not in state:
+                after_units = current_units(root)
+                state["predecessorUnitChanges"] = {
+                    path: {"before": expected, "after": after_units.get(path)}
+                    for path, expected in state.get("predecessorUnits", {}).items()
+                    if after_units.get(path) != expected
                 }
             unexpected_units = sorted(
                 path
@@ -1097,13 +1766,63 @@ def shared_consumer_count(root: Path, transaction: Path) -> int:
     )
 
 
-def load_expected_packages(path: Path) -> list[dict[str, str]]:
+def load_expected_packages(path: Path, workload_ids: set[str] | None = None) -> list[dict[str, str]]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-        records = value["components"]["linuxIosWorkload"]["packages"]
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
         fail(f"cannot read expected package inventory: {error}")
+    components = value.get("components")
+    if not isinstance(components, dict):
+        fail("package inventory lacks components")
+    # Preserve the small standalone transaction fixtures used by contract tests.
+    if workload_ids is None:
+        try:
+            return validated_expected_packages(components["linuxIosWorkload"]["packages"])
+        except (KeyError, TypeError) as error:
+            fail(f"cannot read expected package inventory: {error}")
+    records: list[dict] = []
+    if "ios" in workload_ids:
+        try:
+            records.extend(components["linuxIosWorkload"]["packages"])
+        except (KeyError, TypeError) as error:
+            fail(f"package inventory lacks the iOS graph: {error}")
+    companions = components.get("appleCompanionWorkloads", {}).get("workloads", [])
+    if not isinstance(companions, list):
+        fail("package inventory has invalid companion workload records")
+    found = {"ios"} if "ios" in workload_ids else set()
+    for item in companions:
+        if not isinstance(item, dict) or not isinstance(item.get("workloadId"), str):
+            fail("package inventory contains an invalid companion workload")
+        workload_id = item["workloadId"]
+        if workload_id not in workload_ids:
+            continue
+        manifest = item.get("manifest")
+        packages = item.get("packages")
+        if not isinstance(manifest, dict) or not isinstance(packages, list):
+            fail(f"package inventory has an incomplete {workload_id} graph")
+        records.extend(packages)
+        records.append({"id": manifest.get("id"), "version": manifest.get("version")})
+        found.add(workload_id)
+    missing = sorted(workload_ids - found)
+    if missing:
+        fail("package inventory lacks selected workload graph(s): " + ", ".join(missing))
     return validated_expected_packages(records)
+
+
+def parse_workload_descriptor(raw: str) -> dict[str, str]:
+    workload_id, separator, remainder = raw.partition(":")
+    manifest_id, separator2, identity = remainder.partition(":")
+    if separator != ":" or separator2 != ":":
+        fail("--workload must be WORKLOAD_ID:MANIFEST_ID:VERSION/FEATURE-BAND")
+    version, separator3, feature = identity.partition("/")
+    if separator3 != "/":
+        fail("--workload manifest identity must be VERSION/FEATURE-BAND")
+    return {
+        "workloadId": workload_id,
+        "manifestId": manifest_id,
+        "manifestVersion": version,
+        "manifestFeatureBand": feature,
+    }
 
 
 def main() -> None:
@@ -1127,8 +1846,10 @@ def main() -> None:
     parser.add_argument("--package-inventory", type=Path)
     parser.add_argument("--sdk-feature-band")
     parser.add_argument("--workload-version")
-    parser.add_argument("--workload-manifest")
-    parser.add_argument("--workload-id")
+    parser.add_argument("--workload-manifest")  # Legacy single-workload form.
+    parser.add_argument("--workload-id")  # Legacy single-workload form.
+    parser.add_argument("--workload", action="append", default=[])
+    parser.add_argument("--protect-workload", action="append", default=[])
     parser.add_argument("--control-global-json")
     args = parser.parse_args()
     root = args.root.expanduser().absolute()
@@ -1137,17 +1858,44 @@ def main() -> None:
         required = {
             "--sdk-feature-band": args.sdk_feature_band,
             "--workload-version": args.workload_version,
-            "--workload-manifest": args.workload_manifest,
-            "--workload-id": args.workload_id,
             "--control-global-json": args.control_global_json,
         }
+        if not args.workload:
+            required["--workload-manifest"] = args.workload_manifest
+            required["--workload-id"] = args.workload_id
         missing = [name for name, value in required.items() if value is None]
         if missing:
             fail("begin requires " + ", ".join(missing))
+        raw_workloads = [parse_workload_descriptor(raw) for raw in args.workload]
+        protected_workloads = [parse_workload_descriptor(raw) for raw in args.protect_workload]
+        if not raw_workloads:
+            assert args.workload_id is not None and args.workload_manifest is not None
+            try:
+                version, feature = args.workload_manifest.split("/", 1)
+            except ValueError:
+                fail("workload manifest identity must be VERSION/FEATURE-BAND")
+            provisional = (
+                load_expected_packages(args.package_inventory.expanduser().absolute())
+                if args.package_inventory is not None
+                else []
+            )
+            raw_workloads = [
+                {
+                    "workloadId": args.workload_id,
+                    "manifestId": manifest_package_id(provisional, feature),
+                    "manifestVersion": version,
+                    "manifestFeatureBand": feature,
+                }
+            ]
+        workload_ids = {item["workloadId"] for item in raw_workloads}
         expected = (
-            load_expected_packages(args.package_inventory.expanduser().absolute())
-            if args.package_inventory is not None
-            else None
+            load_expected_packages(args.package_inventory.expanduser().absolute(), workload_ids)
+            if args.package_inventory is not None and args.workload
+            else (
+                load_expected_packages(args.package_inventory.expanduser().absolute())
+                if args.package_inventory is not None
+                else None
+            )
         )
         begin(
             root,
@@ -1155,8 +1903,8 @@ def main() -> None:
             expected,
             sdk_feature_band=args.sdk_feature_band,
             workload_version=args.workload_version,
-            workload_manifest=args.workload_manifest,
-            workload_id=args.workload_id,
+            workloads=raw_workloads,
+            protected_workloads=protected_workloads,
             control_global_json=str(Path(args.control_global_json).expanduser().absolute()),
         )
     elif args.command == "commit":

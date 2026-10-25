@@ -14,6 +14,9 @@ what has actually been demonstrated.
 | [0004](0004-linux-hosted-mono-llvm-aot.md) | Use a matched Linux-hosted Mono LLVM AOT compiler | Accepted |
 | [0005](0005-explicit-signing-and-deployment-boundary.md) | Keep signing, deployment, and launch explicit | Accepted |
 | [0006](0006-use-the-active-host-dotnet-root.md) | Use the active host .NET root with a constrained privilege boundary | Accepted |
+| [0007](0007-linux-apple-workload-scope.md) | Classify Apple workloads without expanding Linux support | Superseded by 0008 |
+| [0008](0008-register-locked-apple-companions.md) | Register locked Apple companions without claiming Linux execution | Accepted |
+| [0009](0009-hermetic-xtool-normalization.md) | Qualify xtool through a hermetic logical build path | Accepted |
 
 New records should identify an owner, state the context, alternatives rejected,
 decision, consequences, evidence boundary, and review trigger. They must not

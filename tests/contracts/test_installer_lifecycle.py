@@ -7,6 +7,7 @@ import fcntl
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -228,7 +229,14 @@ class WorkloadTransactionContracts(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def run_transaction(self, command: str, *, check: bool = True) -> subprocess.CompletedProcess[str]:
+    def run_transaction(
+        self,
+        command: str,
+        *,
+        check: bool = True,
+        workloads: list[str] | None = None,
+        protected_workloads: list[str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         arguments = [
                 sys.executable,
                 str(WORKLOAD_TRANSACTION),
@@ -239,22 +247,24 @@ class WorkloadTransactionContracts(unittest.TestCase):
                 str(self.transaction),
             ]
         if command == "begin":
-            arguments.extend(
-                [
-                    "--package-inventory",
-                    str(self.package_inventory),
-                    "--sdk-feature-band",
-                    "10.0.400",
-                    "--workload-version",
-                    "10.0.401.1",
+            arguments.extend([
+                "--package-inventory", str(self.package_inventory),
+                "--sdk-feature-band", "10.0.400",
+                "--workload-version", "10.0.401.1",
+            ])
+            if workloads is None:
+                arguments.extend([
                     "--workload-manifest",
                     "2.0/10.0.100",
                     "--workload-id",
                     "ios",
-                    "--control-global-json",
-                    str(self.base / "control/global.json"),
-                ]
-            )
+                ])
+            else:
+                for workload in workloads:
+                    arguments.extend(["--workload", workload])
+                for workload in protected_workloads or []:
+                    arguments.extend(["--protect-workload", workload])
+            arguments.extend(["--control-global-json", str(self.base / "control/global.json")])
         return subprocess.run(
             arguments,
             check=check,
@@ -301,6 +311,213 @@ class WorkloadTransactionContracts(unittest.TestCase):
         self.assertTrue((self.root / "metadata" / "workloads" / "X64" / "10.0.400" / "history" / "before.json").is_file())
         self.assertTrue((self.root / "metadata" / "workloads" / "X64" / "10.0.400" / "history" / "failed.json").is_file())
 
+    def test_multi_workload_replacement_restores_predecessor_payloads(self) -> None:
+        self.package_inventory.write_text(json.dumps({"components": {
+            "linuxIosWorkload": {"packages": [{"id": "IosPack", "version": "2.0"}]},
+            "appleCompanionWorkloads": {"workloads": [{
+                "workloadId": "macos",
+                "manifest": {"id": "Microsoft.NET.Sdk.macOS", "version": "2.0"},
+                "packages": [{"id": "MacPack", "version": "2.0"}],
+            }]},
+        }}) + "\n", encoding="utf-8")
+        for workload, manifest_id, package in (
+            ("ios", "Microsoft.NET.Sdk.iOS", "IosPack"),
+            ("macos", "Microsoft.NET.Sdk.macOS", "MacPack"),
+        ):
+            write(self.root / "packs" / package / "2.0" / "payload", f"old-{workload}\n")
+            write(
+                self.root / "sdk-manifests" / "10.0.100" / manifest_id / "2.0" / "WorkloadManifest.json",
+                json.dumps({"workloads": {workload: {"packs": [package]}}, "packs": {package: {}}}),
+            )
+            write(self.root / "metadata/workloads/10.0.400/InstalledWorkloads" / workload, f"old-{workload}\n")
+            write(
+                self.root / "metadata/workloads/InstalledManifests/v1" / manifest_id / "2.0" / "10.0.100" / "10.0.400",
+                "installed\n",
+            )
+        self.run_transaction("begin", workloads=[
+            "ios:Microsoft.NET.Sdk.iOS:2.0/10.0.100",
+            "macos:Microsoft.NET.Sdk.macOS:2.0/10.0.100",
+        ])
+        for workload, manifest_id, package in (
+            ("ios", "Microsoft.NET.Sdk.iOS", "IosPack"),
+            ("macos", "Microsoft.NET.Sdk.macOS", "MacPack"),
+        ):
+            write(self.root / "packs" / package / "2.0" / "payload", f"new-{workload}\n")
+            write(
+                self.root / "sdk-manifests" / "10.0.100" / manifest_id / "2.0" / "WorkloadManifest.json",
+                json.dumps({"workloads": {workload: {"packs": [package, "new"]}}, "packs": {package: {}}}),
+            )
+            write(self.root / "metadata/workloads/10.0.400/InstalledWorkloads" / workload, f"new-{workload}\n")
+        write(self.root / "metadata/workloads/X64/10.0.400/globaljsonworkloadsets.json", json.dumps({str(self.base / "control/global.json"): "10.0.401.1"}))
+        self.run_transaction("commit")
+        self.run_transaction("prepare-uninstall")
+        self.run_transaction("restore")
+        for workload, manifest_id, package in (
+            ("ios", "Microsoft.NET.Sdk.iOS", "IosPack"),
+            ("macos", "Microsoft.NET.Sdk.macOS", "MacPack"),
+        ):
+            self.assertEqual(f"old-{workload}\n", (self.root / "packs" / package / "2.0" / "payload").read_text())
+            self.assertEqual(f"old-{workload}\n", (self.root / "metadata/workloads/10.0.400/InstalledWorkloads" / workload).read_text())
+            manifest = json.loads((self.root / "sdk-manifests" / "10.0.100" / manifest_id / "2.0" / "WorkloadManifest.json").read_text())
+            self.assertEqual([package], manifest["workloads"][workload]["packs"])
+        self.assertEqual("existing\n", (self.root / "metadata/workloads/10.0.400/InstalledWorkloads/android").read_text())
+
+    def test_replacement_from_an_older_manifest_restores_the_observed_predecessor(self) -> None:
+        write(self.root / "packs/OldIosPack/1.0/payload", "old\n")
+        write(self.root / "template-packs/oldiospack.1.0.nupkg", "old-template\n")
+        write(
+            self.root / "sdk-manifests/10.0.100/Microsoft.NET.Sdk.iOS/1.0/WorkloadManifest.json",
+            json.dumps({"workloads": {"ios": {"packs": ["OldIosPack"]}}, "packs": {"OldIosPack": {}}}),
+        )
+        write(self.root / "metadata/workloads/10.0.400/InstalledWorkloads/ios", "old\n")
+        write(
+            self.root / "metadata/workloads/InstalledManifests/v1/Microsoft.NET.Sdk.iOS/1.0/10.0.100/10.0.400",
+            "installed\n",
+        )
+        write(self.root / "metadata/workloads/InstalledPacks/v1/OldIosPack/1.0/10.0.400", "installed\n")
+        self.run_transaction("begin")
+        shutil.rmtree(self.root / "packs/OldIosPack")
+        (self.root / "template-packs/oldiospack.1.0.nupkg").unlink()
+        (self.root / "metadata/workloads/InstalledPacks/v1/OldIosPack/1.0/10.0.400").unlink()
+        write(self.root / "packs/IosPack/2.0/payload", "new\n")
+        write(
+            self.root / "sdk-manifests/10.0.100/microsoft.net.sdk.ios/2.0/WorkloadManifest.json",
+            json.dumps({"workloads": {"ios": {"packs": ["IosPack"]}}, "packs": {"IosPack": {}}}),
+        )
+        shutil.rmtree(self.root / "metadata/workloads/InstalledManifests/v1/Microsoft.NET.Sdk.iOS/1.0")
+        write(
+            self.root / "metadata/workloads/InstalledManifests/v1/Microsoft.NET.Sdk.iOS/2.0/10.0.100/10.0.400",
+            "installed\n",
+        )
+        self.run_transaction("commit")
+        self.run_transaction("restore")
+        self.assertEqual("old\n", (self.root / "packs/OldIosPack/1.0/payload").read_text())
+        self.assertTrue(
+            (self.root / "metadata/workloads/InstalledManifests/v1/Microsoft.NET.Sdk.iOS/1.0/10.0.100/10.0.400").is_file()
+        )
+        self.assertEqual("old-template\n", (self.root / "template-packs/oldiospack.1.0.nupkg").read_text())
+        self.assertTrue(
+            (self.root / "metadata/workloads/InstalledPacks/v1/OldIosPack/1.0/10.0.400").is_file()
+        )
+        self.assertFalse((self.root / "packs/IosPack").exists())
+
+    def test_reconciliation_metadata_is_not_replayed_during_restore(self) -> None:
+        self.run_transaction("begin")
+        self.add_ios_state()
+        foreign = self.root / "metadata/workloads/InstalledPacks/v1/ForeignPack/1.0/10.0.400"
+        write(foreign, "reconciled\n")
+        self.run_transaction("commit")
+        write(foreign, "later-foreign-update\n")
+        self.run_transaction("restore")
+        self.assertEqual("later-foreign-update\n", foreign.read_text(encoding="utf-8"))
+
+    def test_symlinked_workload_metadata_ancestor_fails_before_snapshot(self) -> None:
+        outside = self.base / "outside-metadata"
+        outside.mkdir()
+        shutil.rmtree(self.root / "metadata")
+        (self.root / "metadata").symlink_to(outside, target_is_directory=True)
+        result = self.run_transaction("begin", check=False)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("symlink ancestor", result.stderr)
+
+    def test_keep_existing_workload_change_fails_and_is_restored(self) -> None:
+        self.package_inventory.write_text(json.dumps({"components": {
+            "linuxIosWorkload": {"packages": [{"id": "IosPack", "version": "2.0"}]},
+            "appleCompanionWorkloads": {"workloads": [{
+                "workloadId": "macos",
+                "manifest": {"id": "Microsoft.NET.Sdk.macOS", "version": "2.0"},
+                "packages": [{"id": "MacPack", "version": "2.0"}],
+            }]},
+        }}) + "\n", encoding="utf-8")
+        for workload, manifest_id, package in (
+            ("ios", "Microsoft.NET.Sdk.iOS", "IosPack"),
+            ("macos", "Microsoft.NET.Sdk.macOS", "MacPack"),
+        ):
+            write(self.root / "packs" / package / "2.0" / "payload", f"old-{workload}\n")
+            write(self.root / "sdk-manifests/10.0.100" / manifest_id / "2.0" / "WorkloadManifest.json", json.dumps({"workloads": {workload: {"packs": [package]}}, "packs": {package: {}}}))
+            write(self.root / "metadata/workloads/10.0.400/InstalledWorkloads" / workload, f"old-{workload}\n")
+            write(
+                self.root / "metadata/workloads/InstalledManifests/v1" / manifest_id / "2.0" / "10.0.100" / "10.0.400",
+                "installed\n",
+            )
+        self.run_transaction("begin", workloads=["macos:Microsoft.NET.Sdk.macOS:2.0/10.0.100"], protected_workloads=["ios:Microsoft.NET.Sdk.iOS:2.0/10.0.100"])
+        write(self.root / "packs/IosPack/2.0/payload", "changed-ios\n")
+        result = self.run_transaction("commit", check=False)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("--keep-existing", result.stderr)
+        self.run_transaction("restore")
+        self.assertEqual("old-ios\n", (self.root / "packs/IosPack/2.0/payload").read_text())
+
+    def test_keep_existing_accepts_an_architecture_scoped_marker(self) -> None:
+        self.package_inventory.write_text(json.dumps({"components": {
+            "linuxIosWorkload": {"packages": [{"id": "IosPack", "version": "2.0"}]},
+            "appleCompanionWorkloads": {"workloads": [{
+                "workloadId": "macos",
+                "manifest": {"id": "Microsoft.NET.Sdk.macOS", "version": "2.0"},
+                "packages": [{"id": "MacPack", "version": "2.0"}],
+            }]},
+        }}) + "\n", encoding="utf-8")
+        write(self.root / "packs/IosPack/2.0/payload", "ios\n")
+        write(
+            self.root / "sdk-manifests/10.0.100/microsoft.net.sdk.ios/2.0/WorkloadManifest.json",
+            json.dumps({"workloads": {"ios": {"packs": ["IosPack"]}}, "packs": {"IosPack": {}}}),
+        )
+        protected_marker = self.root / "metadata/workloads/X64/10.0.400/InstalledWorkloads/ios"
+        write(protected_marker, "protected\n")
+        write(
+            self.root / "metadata/workloads/InstalledManifests/v1/Microsoft.NET.Sdk.iOS/2.0/10.0.100/10.0.400",
+            "installed\n",
+        )
+        self.run_transaction(
+            "begin",
+            workloads=["macos:Microsoft.NET.Sdk.macOS:2.0/10.0.100"],
+            protected_workloads=["ios:Microsoft.NET.Sdk.iOS:2.0/10.0.100"],
+        )
+        write(self.root / "packs/MacPack/2.0/payload", "macos\n")
+        write(
+            self.root / "sdk-manifests/10.0.100/Microsoft.NET.Sdk.macOS/2.0/WorkloadManifest.json",
+            json.dumps({"workloads": {"macos": {"packs": ["MacPack"]}}, "packs": {"MacPack": {}}}),
+        )
+        write(self.root / "metadata/workloads/10.0.400/InstalledWorkloads/macos", "installed\n")
+        write(
+            self.root / "metadata/workloads/InstalledManifests/v1/Microsoft.NET.Sdk.macOS/2.0/10.0.100/10.0.400",
+            "installed\n",
+        )
+        write(
+            self.root / "metadata/workloads/X64/10.0.400/globaljsonworkloadsets.json",
+            json.dumps({str(self.base / "control/global.json"): "10.0.401.1"}),
+        )
+        self.run_transaction("commit")
+        self.assertEqual("protected\n", protected_marker.read_text(encoding="utf-8"))
+
+    def test_keep_existing_rejects_a_different_manifest_identity_at_begin(self) -> None:
+        self.package_inventory.write_text(json.dumps({"components": {
+            "linuxIosWorkload": {"packages": [{"id": "IosPack", "version": "2.0"}]},
+            "appleCompanionWorkloads": {"workloads": [{
+                "workloadId": "macos",
+                "manifest": {"id": "Microsoft.NET.Sdk.macOS", "version": "2.0"},
+                "packages": [{"id": "MacPack", "version": "2.0"}],
+            }]},
+        }}) + "\n", encoding="utf-8")
+        write(self.root / "packs/IosPack/1.0/payload", "ios\n")
+        write(
+            self.root / "sdk-manifests/10.0.100/Microsoft.NET.Sdk.iOS/1.0/WorkloadManifest.json",
+            json.dumps({"workloads": {"ios": {"packs": ["IosPack"]}}, "packs": {"IosPack": {}}}),
+        )
+        write(self.root / "metadata/workloads/10.0.400/InstalledWorkloads/ios", "installed\n")
+        write(
+            self.root / "metadata/workloads/InstalledManifests/v1/Microsoft.NET.Sdk.iOS/1.0/10.0.100/10.0.400",
+            "installed\n",
+        )
+        result = self.run_transaction(
+            "begin",
+            check=False,
+            workloads=["macos:Microsoft.NET.Sdk.macOS:2.0/10.0.100"],
+            protected_workloads=["ios:Microsoft.NET.Sdk.iOS:2.0/10.0.100"],
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("exact locked manifest identity", result.stderr)
+
     def test_uninstall_preserves_workload_installed_after_ios(self) -> None:
         self.run_transaction("begin")
         self.add_ios_state()
@@ -332,6 +549,30 @@ class WorkloadTransactionContracts(unittest.TestCase):
             ).exists()
         )
         self.assertFalse(self.transaction.exists())
+
+    def test_uninstall_preserves_preexisting_apple_and_maui_workloads(self) -> None:
+        installed_workloads = (
+            self.root / "metadata" / "workloads" / "10.0.400" / "InstalledWorkloads"
+        )
+        workload_ids = ("maccatalyst", "tvos", "macos", "maui-ios")
+        for workload_id in workload_ids:
+            write(installed_workloads / workload_id, "existing\n")
+
+        self.run_transaction("begin")
+        self.add_ios_state()
+        self.run_transaction("commit")
+        self.run_transaction("prepare-uninstall")
+        (self.root / "packs" / "IosPack" / "2.0" / "payload").unlink()
+        (self.root / "packs" / "IosPack" / "2.0").rmdir()
+        (self.root / "template-packs" / "iospack.2.0.nupkg").unlink()
+        (installed_workloads / "ios").unlink()
+
+        self.run_transaction("restore")
+
+        for workload_id in workload_ids:
+            self.assertEqual(
+                "existing\n", (installed_workloads / workload_id).read_text(encoding="utf-8")
+            )
 
     def test_modified_owned_pack_blocks_restore_before_any_removal(self) -> None:
         self.run_transaction("begin")
@@ -1015,7 +1256,7 @@ fi
     def test_workload_install_relies_on_private_global_json_pin(self) -> None:
         installer = TOP_LEVEL_INSTALLER.read_text(encoding="utf-8")
         self.assertNotIn('"$dotnet_root/dotnet" workload update \\\n', installer)
-        self.assertIn('"$dotnet_root/dotnet" workload install ios \\\n', installer)
+        self.assertIn('"$dotnet_root/dotnet" workload install "${managed_workloads[@]}" \\\n', installer)
         self.assertIn('"workloadVersion":sys.argv[3]', installer)
         self.assertNotIn('"$dotnet_root/dotnet" workload uninstall ios', installer)
         self.assertNotIn(

@@ -6,6 +6,14 @@ environment, record its immutable source, integrity hash, license/notice, and
 redistribution classification in `toolchain.lock.json` and the relevant
 receipt.
 
+## Provenance authority boundary
+
+External installer and host-setup projects may inspire an implementation, but
+they are not installer inputs, compatibility authorities, audit baselines, or
+reference implementations for this repository. Only independently pinned
+upstream component inputs, project-owned setup code, and project-produced
+evidence belong to the operational provenance boundary.
+
 ## Required classifications
 
 - `redistributable`: rights and required notices have been confirmed.
@@ -72,6 +80,25 @@ their exact sources/artifact into the operator's cache and creates a private
 local executable. A future binary release would need to carry every applicable
 notice and satisfy the LGPL source, relinking, and modification requirements;
 until that release-specific work is done, binary redistribution is blocked.
+
+xtool normalization inputs are part of the executable provenance boundary.
+GNU Binutils 2.47 is built from its exact hash-locked source archive with the
+locked Swift Clang/LLD stage; the staged `objcopy`, `strip`, and `readelf`
+hashes are enforced and the tools are invoked by absolute path. Ambient GNU or
+LLVM tools are not substitutes. The setup creates a neutral project mountpoint
+below `/tmp`; a rootless mount namespace overlays only that directory with
+private tmpfs and exposes the physical SwiftPM scratch tree at a locked logical
+child before compilation. Swift `#file` strings are therefore deterministic
+without rewriting `.rodata`, requiring an OpenCode path, or hiding unrelated
+host temporary files.
+
+Any change to that path, namespace model, normalizer source/tool hashes, or
+normalization sequence requires two clean offline builds from distinct physical
+prefixes. Complete xtool and XADI bytes, static ELF metadata, absence of both
+physical prefixes, and post-hash runtime checks must agree before rebaselining.
+Masked hashes, ignored sections, broad path substitution, and automatic lock
+updates are prohibited. Failed diagnostics are static-only, checksummed, and
+kept outside the repository after review for private paths.
 
 ## Portable Python and pymobiledevice3 closure
 

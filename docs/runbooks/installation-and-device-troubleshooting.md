@@ -19,6 +19,83 @@ Keep the output local until it has been reviewed for paths, identifiers, and
 secrets. Do not hand-edit workload records, packs, SDK manifests, or installer
 receipts to bypass a failure.
 
+Before a first install, `./install.sh preflight` is the read-only way to inspect
+the active host workload markers. It does not invoke `dotnet`, create project
+data/cache roots, or add workload registrations. Its Apple classifications are
+preservation information: only direct `ios` has the Linux runtime/device
+boundary. Workloads that reach only Mac Catalyst, tvOS, or macOS are
+reference-only for execution; iOS-derived and mixed workloads are unqualified.
+Preflight itself is never an installation or deployment plan. Default
+writable-root installation registers the locked direct `macos`, `maccatalyst`,
+and `tvos` entries, but those registrations remain `installed-unqualified` and
+do not establish a Linux build or runtime path. `mixed-unqualified` means a
+closure with a non-Apple leaf or with `ios` plus another Apple root.
+
+### Direct Apple workload ownership
+
+Writable-root installation registers `ios`, `macos`, `maccatalyst`, and `tvos`
+in one standard CLI transaction. Only `ios` is supported for Linux
+build/sign/deploy/runtime work. The companion IDs are present only so the exact
+locked workload-set registrations can coexist and be restored safely.
+
+Use `--keep-existing` only when an existing direct registration must remain
+external to this installer:
+
+```sh
+./install.sh install --xcode-archive /private/path/Xcode_27.xip \
+  --keep-existing ios
+```
+
+It can be repeated for any direct Apple ID. The requested registration must
+already exist. The installer snapshots it and fails rather than replacing its
+payload; its unavoidable global `InstalledPacks` reconciliation records are
+journaled. To change a completed installation's keep policy, uninstall first;
+do not edit the receipt or workload metadata.
+
+### AOT compiler cache fails verification
+
+Do not edit a compiler hash or create `aot-build-provenance.json` by hand. A
+compiler executable without verified provenance is an incomplete cache entry,
+not a reusable AOT compiler. Current installer versions discard that entry and
+rebuild it in a temporary cache directory before atomically publishing the
+verified result. If an older installer left a rejected entry behind, stop all
+installer processes and remove only its project-owned subtree:
+
+```sh
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/dotnet-ios-linux/build/mono-aot-4271d88e0aebf3d04f188f1334c2220d80555ef6"
+```
+
+If a fresh normalized build still reports a hash mismatch, preserve the output,
+do not bypass the check, and report the expected and actual hashes with the host
+Clang/CMake versions.
+
+### xtool normalization hash mismatch
+
+Do not edit the xtool hash or rerun with an ambient `objcopy` or `strip`. The
+normalizer and fixed logical build path are part of the lock. First confirm that
+unprivileged user namespaces are enabled; the installer fails rather than using
+a weaker fallback when they are unavailable.
+
+The installer creates `/tmp/dotnet-ios-linux` when absent and overlays only that
+neutral mountpoint inside the build namespace. The logical child should not
+exist on the host, and no harness-specific temporary path is a prerequisite. A
+symlink or non-directory at the neutral mountpoint is rejected as unsafe.
+
+For a maintainer-directed reproduction, pass a new private diagnostics path to
+the component setup command:
+
+```sh
+eng/toolchain/setup-xtool.sh ... \
+  --diagnostics-dir "$HOME/.cache/dotnet-ios-linux/diagnostics/xtool-$(date +%s)"
+```
+
+On mismatch, the directory contains a `SHA256SUMS` manifest, exact normalizer
+provenance, static ELF metadata, and pre/post-normalization artifacts. The
+unverified executable is not run. Keep this directory private until paths and
+other identifying strings have been reviewed; report its expected and actual
+hashes, Binutils hashes, and namespace error, if any. A successful build does
+not retain this optional capture.
+
 ## Installation fails before completion
 
 1. Check the compatibility error emitted by the installer. The supplied Xcode
@@ -35,8 +112,8 @@ receipts to bypass a failure.
 
 The installer may reuse a newer installed SDK patch within the supported feature
 band. It does not cross feature bands. It also selects only an installed workload
-set whose iOS mapping matches the locked runtime/AOT graph; a newer incompatible
-workload set is not silently substituted. These reuse rules apply to writable
+set whose four direct Apple mappings match the locked runtime/AOT and companion
+graphs; a newer incompatible workload set is not silently substituted. These reuse rules apply to writable
 roots. A non-writable package-manager root must already have a compatible SDK
 and may select only the lock's exact workload-set version. The installer does
 not merge an SDK fallback into that root; if the exact workload set is absent,
@@ -88,6 +165,12 @@ resumable; do not remove transaction directories or `.dotnet-ios-linux-*`
 tombstones manually. Teardown does not call broad `dotnet workload uninstall`:
 it restores only recorded paths and the private control key, retaining exact
 shared resources when another recorded global JSON selects the same set.
+
+The helper currently supports only the iOS system-root installation path. It
+reports that it has transformed the request to an iOS-only plan and records
+only `ios` in the receipt; it also rejects `--keep-existing`. Use a
+writable/disposable root for all-four registration validation; do not work
+around this boundary with `sudo` or manually created markers.
 
 ## Signing or installation fails
 

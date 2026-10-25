@@ -112,6 +112,31 @@ class ToolchainContracts(unittest.TestCase):
         self.assertEqual(str(self.sdk.resolve()), marker["sdkSource"])
         self.assertIn(f"export DEVELOPER_DIR={self.developer}", self.activation.read_text())
 
+    def test_bundle_contains_swiftbuild_platform_and_toolchain_metadata(self) -> None:
+        platform = plistlib.loads(
+            (self.developer / "Platforms" / "iPhoneOS.platform" / "Info.plist").read_bytes()
+        )
+        self.assertEqual(
+            {
+                "Type": "Platform",
+                "Name": "iphoneos",
+                "Identifier": "com.apple.platform.iphoneos",
+                "Version": "27.0",
+                "Description": "iOS",
+                "FamilyName": "iOS",
+                "FamilyIdentifier": "iphoneos",
+            },
+            {key: platform[key] for key in ("Type", "Name", "Identifier", "Version", "Description", "FamilyName", "FamilyIdentifier")},
+        )
+        self.assertEqual(
+            {"Device": "iphoneos", "Simulator": "iphonesimulator"},
+            platform["FamilyPlatforms"],
+        )
+        toolchain = self.developer / "Toolchains" / "XcodeDefault.xctoolchain"
+        expected = {"Identifier": "com.apple.dt.toolchain.XcodeDefault"}
+        self.assertEqual(expected, plistlib.loads((toolchain / "Info.plist").read_bytes()))
+        self.assertEqual(expected, plistlib.loads((toolchain / "ToolchainInfo.plist").read_bytes()))
+
     def test_xcode_27_system_version_sdk_build_fallback(self) -> None:
         settings_path = self.sdk / "SDKSettings.plist"
         settings = plistlib.loads(settings_path.read_bytes())

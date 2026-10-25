@@ -6,12 +6,18 @@ umask 077
 usage() {
     cat <<'EOF'
 Usage: verify-workload-lifecycle.sh --sdk-archive <tar.gz>
-       --official-manifest <nupkg> --aot-pack <directory> --output <directory>
+       --official-manifest <ios.nupkg>
+       --official-macos-manifest <nupkg>
+       --official-maccatalyst-manifest <nupkg>
+       --official-tvos-manifest <nupkg>
+       --aot-pack <directory> --output <directory>
        [--developer-dir <Xcode.app/Contents/Developer>]
 
-Creates an isolated .NET home, installs the pinned workload set and Linux ios
-workload, exercises restore/repair/uninstall/reinstall, and optionally builds an
-unchanged copy of HelloIos. The output path must not already exist.
+Creates an isolated .NET home, installs the pinned workload set and all four
+direct Apple registrations, exercises restore/repair/uninstall/reinstall, and
+optionally builds an unchanged copy of HelloIos. Only ios is build-qualified on
+Linux; macos, maccatalyst, and tvos are registration-only. The output path must
+not already exist.
 EOF
 }
 
@@ -19,6 +25,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repository="$(cd "$script_dir/../.." && pwd -P)"
 sdk_archive=""
 official_manifest=""
+official_macos_manifest=""
+official_maccatalyst_manifest=""
+official_tvos_manifest=""
 aot_pack=""
 output=""
 developer_dir=""
@@ -26,6 +35,9 @@ while (($#)); do
     case "$1" in
         --sdk-archive) sdk_archive="${2:?missing value for --sdk-archive}"; shift 2 ;;
         --official-manifest) official_manifest="${2:?missing value for --official-manifest}"; shift 2 ;;
+        --official-macos-manifest) official_macos_manifest="${2:?missing value for --official-macos-manifest}"; shift 2 ;;
+        --official-maccatalyst-manifest) official_maccatalyst_manifest="${2:?missing value for --official-maccatalyst-manifest}"; shift 2 ;;
+        --official-tvos-manifest) official_tvos_manifest="${2:?missing value for --official-tvos-manifest}"; shift 2 ;;
         --aot-pack) aot_pack="${2:?missing value for --aot-pack}"; shift 2 ;;
         --output) output="${2:?missing value for --output}"; shift 2 ;;
         --developer-dir) developer_dir="${2:?missing value for --developer-dir}"; shift 2 ;;
@@ -33,7 +45,9 @@ while (($#)); do
         *) usage >&2; exit 2 ;;
     esac
 done
-[[ -n "$sdk_archive" && -n "$official_manifest" && -n "$aot_pack" && -n "$output" ]] || {
+[[ -n "$sdk_archive" && -n "$official_manifest" && -n "$official_macos_manifest" && \
+    -n "$official_maccatalyst_manifest" && -n "$official_tvos_manifest" && -n "$aot_pack" && \
+    -n "$output" ]] || {
     usage >&2
     exit 2
 }
@@ -44,6 +58,9 @@ done
 
 sdk_archive="$(realpath "$sdk_archive")"
 official_manifest="$(realpath "$official_manifest")"
+official_macos_manifest="$(realpath "$official_macos_manifest")"
+official_maccatalyst_manifest="$(realpath "$official_maccatalyst_manifest")"
+official_tvos_manifest="$(realpath "$official_tvos_manifest")"
 aot_pack="$(realpath "$aot_pack")"
 if [[ -n "$developer_dir" ]]; then
     developer_dir="$(realpath "$developer_dir")"
@@ -59,6 +76,9 @@ mkdir -m700 -p "$output/dotnet" "$output/home" "$output/cli-home" \
 tar -xzf "$sdk_archive" -C "$output/dotnet"
 "$repository/eng/workload/build-local-feed.py" \
     --official-manifest "$official_manifest" \
+    --official-companion-manifest "macos=$official_macos_manifest" \
+    --official-companion-manifest "maccatalyst=$official_maccatalyst_manifest" \
+    --official-companion-manifest "tvos=$official_tvos_manifest" \
     --aot-pack "$aot_pack" \
     --output "$output/feed"
 
@@ -79,18 +99,22 @@ workload_update() {
         --disable-parallel --temp-dir "$output/temp" --verbosity minimal
 }
 workload_install() {
-    "$dotnet" workload install ios --configfile "$config" \
+    "$dotnet" workload install ios macos maccatalyst tvos --configfile "$config" \
         --disable-parallel --temp-dir "$output/temp" --verbosity minimal
 }
 assert_installed() {
-    "$dotnet" workload list | grep -Eq '^ios[[:space:]]+27\.0\.10722/10\.0\.100'
+    local workload
+    for workload in ios macos maccatalyst tvos; do
+        "$dotnet" workload list | grep -Eq "^${workload}[[:space:]]+27\\.0\\.10722/10\\.0\\.100"
+    done
     [[ -f "$DOTNET_ROOT/packs/DotnetIosLinux.Sdk/0.1.0-preview.1/Sdk/Sdk.props" ]]
     [[ -x "$DOTNET_ROOT/packs/DotnetIosLinux.Runtime.AOT.linux-x64.Cross.ios-arm64/0.1.0-preview.1/tools/mono-aot-cross" ]]
     [[ -d "$DOTNET_ROOT/packs/Microsoft.iOS.Sdk.net10.0_26.0/26.0.11017" ]]
     [[ -d "$DOTNET_ROOT/packs/Microsoft.iOS.Sdk.net10.0_27.0/27.0.10722" ]]
-    "$repository/eng/install/verify-workload-packages.py" --root "$DOTNET_ROOT" \
+    python3 "$repository/eng/install/verify-workload-packages.py" --root "$DOTNET_ROOT" \
         --feed "$output/feed" --lock "$repository/toolchain.lock.json" \
-        --dotnet "$dotnet" >/dev/null
+        --dotnet "$dotnet" \
+        --workload ios --workload macos --workload maccatalyst --workload tvos >/dev/null
 }
 
 mkdir -p "$output/control"
@@ -117,11 +141,13 @@ project="$output/project/tests/HelloIos/HelloIos.csproj"
 "$dotnet" workload repair --configfile "$config" --disable-parallel --verbosity minimal
 assert_installed
 
-"$dotnet" workload uninstall ios
-if "$dotnet" workload list | grep -Eq '^ios[[:space:]]'; then
-    printf 'ios remained installed after workload uninstall\n' >&2
-    exit 1
-fi
+"$dotnet" workload uninstall ios macos maccatalyst tvos
+for workload in ios macos maccatalyst tvos; do
+    if "$dotnet" workload list | grep -Eq "^${workload}[[:space:]]"; then
+        printf '%s remained installed after workload uninstall\n' "$workload" >&2
+        exit 1
+    fi
+done
 "$dotnet" workload clean
 workload_install
 assert_installed

@@ -32,6 +32,22 @@ iOS runtime and LLVM inputs. The supported path is LLVM-enabled AOT for
 - A future compiler or runtime upgrade is a new compatibility evaluation, not a
   transparent package refresh.
 
+## Implementation invariants
+
+- The compiler cache is committed only after the ELF compiler, matched LLVM
+  dependencies, locked compiler SHA-256, and complete provenance record have
+  been verified. An executable by itself is an incomplete cache entry and is
+  never reused.
+- Compilation uses canonical source, build, install, and LLVM debug-prefix maps
+  plus deterministic locale/time inputs. The locked reproducible compiler hash
+  is accepted only after builds under distinct absolute prefixes match.
+- Compilation happens in a temporary sibling directory. The verified root is
+  published atomically without replacement; a failed build cannot become a
+  reusable cache entry.
+- Historical smoke and device records retain the compiler hash observed during
+  those runs. They are evidence, not a claim that a later reproducible rebuild
+  was used for the historical device result.
+
 ## Evidence boundary and review
 
 Compiler inputs and the current device-path scope are recorded in
