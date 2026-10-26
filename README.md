@@ -35,10 +35,36 @@ installer compatibility—not baseline provenance or additional device evidence.
 
 ## Quick start
 
-The installer supports glibc Linux x86_64. Have Bash, Python 3.10+, Git, curl,
-CMake, Ninja, Make, Clang, binutils, `file`, `flock`, standard archive/checksum
-tools, and a compatible host `dotnet` already on `PATH`. It never invokes a
-distro package manager.
+Before installing, check these prerequisites:
+
+- **Host:** glibc Linux x86_64, and run the installer as your ordinary user
+  (never as root or through `sudo`). The installer does not invoke a distro
+  package manager or install host packages; distribution compatibility is not
+  implied beyond the stated host boundary.
+- **Already on `PATH`:** Bash; Python 3.10 or newer; and a compatible .NET SDK
+  (`dotnet`). The install/build scripts also require host commands including
+  `curl`, `git`, `cmake`, `ninja`, `make`, `clang`, `clang++`, GNU binutils
+  (`objcopy`, `readelf`, `strip`), `file`, `tar`, `bzip2`, `flock`,
+  `sha256sum`, `sha512sum`, `findmnt`, `mount`, and `unshare`, plus standard
+  Linux utilities. These are host prerequisites, not tools fetched by the
+  installer.
+- **Installer input:** an original Xcode XIP archive supplied by the operator.
+  The installer validates it against the selected iOS workload; Apple SDK
+  contents are not downloaded or bundled by this project.
+- **Only for a non-writable/system .NET root:** `sudo` access is needed for the
+  constrained workload helper. Do not launch the installer itself with `sudo`.
+
+The installer acquires and verifies its pinned private Swift, Binutils, xtool,
+`rcodesign`, Python, and device-transport toolchain inputs itself; those staged
+tools do not need to be preinstalled as host tools. Network access is needed
+unless complete, verified inputs are already cached and `--offline` is used.
+
+**Only for installing and launching on a physical device** (not for toolchain
+installation): use a paired iPhone over USB, with working host `usbmuxd` and OS
+device access, an operator-approved personalized Developer Disk Image mounted,
+and operator-provided signing configuration/material. See
+[`eng/toolchain/README.md`](eng/toolchain/README.md#development-signing-and-device-actions)
+for device and signing preparation.
 
 Supply an original, operator-provided Xcode XIP compatible with the selected
 iOS workload:
